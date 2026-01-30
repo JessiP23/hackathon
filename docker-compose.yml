@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: infrastreet-postgres
+    environment:
+      POSTGRES_USER: infrastreet
+      POSTGRES_PASSWORD: infrastreet
+      POSTGRES_DB: infrastreet
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: infrastreet-redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:
