@@ -21,10 +21,11 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@leanmcp/core": "^0.3.14",
-    "@leanmcp/ui": "^0.2.1",
     "@leanmcp/auth": "^0.4.0",
-    "dotenv": "^16.5.0"
+    "@leanmcp/core": "^0.3.19",
+    "@leanmcp/ui": "^0.2.1",
+    "axios": "^1.13.4",
+    "dotenv": "^16.6.1"
   },
   "devDependencies": {
     "@leanmcp/cli": "^0.4.0",
