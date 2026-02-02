@@ -113,7 +113,7 @@ export default function VendorPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white pb-28">
+    <main className="min-h-screen bg-white pb-28 text-black">
       {/* Header */}
       <div className="bg-black text-white p-6 pb-8">
         <Link href="/search" className="text-gray-400 text-sm">← Back</Link>

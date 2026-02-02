@@ -81,8 +81,21 @@ export async function getVendorOrders(vendorId: string): Promise<Order[]> {
 }
 
 export async function getCustomerOrders(phone: string): Promise<Order[]> {
-  const res = await api.get(`/orders/customer/${phone}`);
-  return res.data;
+  try {
+    const res = await api.get(`/orders/customer/${encodeURIComponent(phone)}`);
+    return res.data.orders || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getRecommendations(phone: string): Promise<Vendor[]> {
+  try {
+    const res = await api.get(`/orders/recommendations/${encodeURIComponent(phone)}`);
+    return res.data.vendors || [];
+  } catch {
+    return [];
+  }
 }
 
 export async function updateOrderStatus(orderId: string, status: string) {
@@ -103,6 +116,10 @@ export async function createDeal(data: {
 }
 
 export async function getDealsNearby(lat: number, lng: number): Promise<Deal[]> {
-  const res = await api.get("/deals", { params: { lat, lng } });
-  return res.data;
+  try {
+    const res = await api.get("/deals", { params: { lat, lng } });
+    return res.data.deals || res.data || [];
+  } catch {
+    return [];
+  }
 }
