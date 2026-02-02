@@ -1,47 +1,52 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getCurrentLocation } from "../services/location";
-import { getDeals } from "../services/api";
-import DealCard from "../components/DealCard";
-import MapView from "../components/MapView";
-import VoiceDial from "../components/VoiceDial";
-import { Deal, Location } from "../shared/types";
+import { getCurrentLocation } from "@/app/services/location";
+import { getDeals } from "@/app/services/api";
+import DealCard from "@/app/components/DealCard";
+import MapView from "@/app/components/MapView";
+import { Deal, Location } from "@/app/shared/types";
 
 export default function DealsPage() {
   const [location, setLocation] = useState<Location | null>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getCurrentLocation().then(async (loc) => {
-      setLocation(loc);
-      const res = await getDeals(loc.lat, loc.lng);
-      setDeals(res.deals || []);
-    });
+    getCurrentLocation()
+      .then(async (loc) => {
+        setLocation(loc);
+        const res = await getDeals(loc.lat, loc.lng);
+        setDeals(res.deals || []);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
-  async function handleVoice(transcript: string) {
-    if (!location) return;
-    setLoading(true);
-    const res = await getDeals(location.lat, location.lng); // backend can filter by transcript
-    setDeals(res.deals || []);
-    setLoading(false);
-  }
-
   return (
-    <main className="min-h-screen p-4 space-y-4">
+    <main className="min-h-screen">
       <MapView deals={deals} userLocation={location} />
 
-      {loading && <div className="text-sm text-gray-500">Searching deals...</div>}
+      <div className="p-4 space-y-4">
+        <h2 className="text-xl font-bold">🔥 Flash Deals Nearby</h2>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {deals.map((d, i) => (
-          <DealCard key={i} deal={d} />
-        ))}
+        {loading && (
+          <div className="text-sm text-gray-500 animate-pulse">
+            Finding deals...
+          </div>
+        )}
+
+        {!loading && deals.length === 0 && (
+          <div className="text-center py-8 text-gray-500">
+            No active deals nearby right now
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {deals.map((d) => (
+            <DealCard key={d.dealId} deal={d} />
+          ))}
+        </div>
       </div>
-
-      <VoiceDial onTranscript={handleVoice} />
     </main>
   );
 }
