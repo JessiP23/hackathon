@@ -6,8 +6,8 @@ router = APIRouter()
 service = VoiceService()
 
 @router.post("/voice")
-def handle_voice(payload: VoiceRequest):
-    return service.process_voice_query(
+async def handle_voice(payload: VoiceRequest):
+    return await service.process_voice_query(
         transcript=payload.transcript,
         lat=payload.lat,
         lng=payload.lng

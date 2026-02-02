@@ -1,17 +1,16 @@
 import dotenv from "dotenv";
 import { createHTTPServer } from "@leanmcp/core";
 
-// Load environment variables
 dotenv.config();
 
-// Services are automatically discovered from ./mcp directory
-await createHTTPServer({
-  name: "mcp-server",
+const PORT = parseInt(process.env.PORT || "3001");
+
+const server = await createHTTPServer({
+  name: "infrastreet-mcp",
   version: "1.0.0",
-  port: 3001,
+  port: PORT,
   cors: true,
-  logging: true
-  // stateless: false,  // Enable stateful mode (uses DynamoDB on Lambda for session persistence)
+  logging: true,
 });
 
-console.log("\nmcp-server MCP Server");
+console.log(`🚀 InfraStreet MCP Server running on port ${PORT}`);
