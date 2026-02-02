@@ -9,9 +9,15 @@ class OrderService:
     def create_order(self, payload):
         db = SessionLocal()
         try:
-            vendor_id = payload.get("vendorId")
-            customer_phone = payload.get("customerPhone")
-            items = payload.get("items", [])
+            # Handle both dict and Pydantic model
+            if hasattr(payload, 'vendorId'):
+                vendor_id = payload.vendorId
+                customer_phone = payload.customerPhone
+                items = [{"itemId": i.itemId, "quantity": i.quantity} for i in payload.items]
+            else:
+                vendor_id = payload.get("vendorId")
+                customer_phone = payload.get("customerPhone")
+                items = payload.get("items", [])
 
             # Get menu items to calculate total
             item_ids = [i["itemId"] for i in items]
@@ -25,17 +31,20 @@ class OrderService:
             order_items = []
             total = 0
             for item in items:
-                if item["itemId"] in menu_map:
-                    m = menu_map[item["itemId"]]
+                item_id = item["itemId"]
+                qty = item["quantity"]
+                if item_id in menu_map:
+                    m = menu_map[item_id]
                     order_items.append({
-                        "itemId": item["itemId"],
+                        "itemId": item_id,
                         "name": m["name"],
                         "price": m["price"],
-                        "quantity": item["quantity"]
+                        "quantity": qty
                     })
-                    total += m["price"] * item["quantity"]
+                    total += m["price"] * qty
 
             pickup_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+            items_json = json.dumps(order_items)
 
             result = db.execute(
                 text("""
@@ -44,7 +53,7 @@ class OrderService:
                         'o_' || substr(md5(random()::text), 1, 8),
                         :vendor_id,
                         :customer_phone,
-                        :items::jsonb,
+                        CAST(:items_json AS jsonb),
                         :total,
                         'pending',
                         :pickup_code,
@@ -55,7 +64,7 @@ class OrderService:
                 {
                     "vendor_id": vendor_id,
                     "customer_phone": customer_phone,
-                    "items": json.dumps(order_items),
+                    "items_json": items_json,
                     "total": total,
                     "pickup_code": pickup_code
                 }
@@ -183,7 +192,6 @@ class OrderService:
         """Get personalized recommendations based on order history"""
         db = SessionLocal()
         try:
-            # Get items from past orders
             past_orders = db.execute(
                 text("""
                     SELECT items FROM orders 
@@ -194,7 +202,6 @@ class OrderService:
                 {"phone": phone}
             ).fetchall()
 
-            # Extract item names from past orders
             past_item_names = []
             for order in past_orders:
                 items = order.items if isinstance(order.items, list) else json.loads(order.items) if order.items else []
@@ -203,7 +210,6 @@ class OrderService:
                         past_item_names.append(item["name"].lower())
 
             if not past_item_names:
-                # No history, return popular vendors
                 vendors = db.execute(
                     text("""
                         SELECT v.id, v.name, v.business_hours
@@ -225,7 +231,6 @@ class OrderService:
                     ]
                 }
 
-            # Find vendors with similar items
             vendors = db.execute(
                 text("""
                     SELECT DISTINCT v.id, v.name, v.business_hours
@@ -251,7 +256,6 @@ class OrderService:
                 for item in menu_items:
                     item_lower = item.item_name.lower()
                     for past in past_item_names:
-                        # Check for word overlap
                         past_words = set(past.split())
                         item_words = set(item_lower.split())
                         if past_words & item_words:
@@ -268,10 +272,8 @@ class OrderService:
                         "score": score
                     })
 
-            # Sort by score
             results.sort(key=lambda x: -x["score"])
 
-            # Remove score from output
             for r in results:
                 del r["score"]
 

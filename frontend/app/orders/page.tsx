@@ -39,7 +39,7 @@ export default function OrdersPage() {
     <main className="min-h-screen bg-neutral-950 text-white">
       <header className="sticky top-0 z-20 backdrop-blur-xl bg-neutral-950/80 border-b border-white/5">
         <div className="max-w-lg mx-auto px-5 py-4 flex items-center justify-between">
-          <Link href="/" className="text-neutral-500 hover:text-white transition-colors text-sm font-medium">
+          <Link href="/search" className="text-neutral-500 hover:text-white transition-colors text-sm font-medium">
             Back
           </Link>
           <span className="font-bold">My Orders</span>

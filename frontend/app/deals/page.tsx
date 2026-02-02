@@ -40,7 +40,7 @@ export default function DealsPage() {
     <main className="min-h-screen bg-neutral-950 text-white">
       <header className="sticky top-0 z-20 bg-gradient-to-r from-red-600 to-orange-500">
         <div className="max-w-lg mx-auto px-5 py-6">
-          <Link href="/" className="text-white/70 text-sm font-medium">Back</Link>
+          <Link href="/search" className="text-white/70 text-sm font-medium">Back</Link>
           <h1 className="text-2xl font-black mt-2">Hot Deals</h1>
           <p className="text-white/70 text-sm mt-1">Limited time only</p>
         </div>
