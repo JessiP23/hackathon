@@ -37,34 +37,34 @@ export default function DealsPage() {
   const activeDeals = deals.filter((d) => d.expiresAt && getTimeLeft(d.expiresAt));
 
   return (
-    <main className="min-h-screen bg-white">
-      <header className="bg-red-500 text-white px-4 py-6">
-        <div className="max-w-lg mx-auto">
-          <Link href="/" className="text-red-200 text-sm">Back</Link>
+    <main className="min-h-screen bg-neutral-950 text-white">
+      <header className="sticky top-0 z-20 bg-gradient-to-r from-red-600 to-orange-500">
+        <div className="max-w-lg mx-auto px-5 py-6">
+          <Link href="/" className="text-white/70 text-sm font-medium">Back</Link>
           <h1 className="text-2xl font-black mt-2">Hot Deals</h1>
-          <p className="text-red-200 text-sm mt-1">Limited time only</p>
+          <p className="text-white/70 text-sm mt-1">Limited time only</p>
         </div>
       </header>
 
-      <div className="max-w-lg mx-auto p-4">
+      <div className="max-w-lg mx-auto px-5 py-6">
         {loading && (
           <div className="flex justify-center py-20">
-            <div className="w-6 h-6 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
           </div>
         )}
 
         {!loading && activeDeals.length === 0 && (
           <div className="text-center py-20">
-            <p className="text-xl font-bold mb-2">No deals right now</p>
-            <p className="text-gray-400 mb-6">Check back soon</p>
-            <Link href="/search" className="bg-black text-white px-6 py-3 rounded-xl font-semibold">
+            <h2 className="text-2xl font-bold mb-2">No deals right now</h2>
+            <p className="text-neutral-500 mb-8">Check back soon</p>
+            <Link href="/search" className="inline-block bg-white text-black px-8 py-3 rounded-xl font-bold">
               Browse Vendors
             </Link>
           </div>
         )}
 
         <div className="space-y-3">
-          {activeDeals.map((deal) => {
+          {activeDeals.map((deal, index) => {
             const timeLeft = getTimeLeft(deal.expiresAt);
             const savings = deal.originalPrice
               ? Math.round(((deal.originalPrice - deal.dealPrice) / deal.originalPrice) * 100)
@@ -74,31 +74,38 @@ export default function DealsPage() {
               <Link
                 key={deal.dealId}
                 href={`/vendor/${deal.vendorId}`}
-                className="block bg-red-50 border border-red-100 rounded-2xl p-4 relative"
+                className="block bg-gradient-to-br from-red-500/10 to-orange-500/10 border border-red-500/20 rounded-2xl p-5 relative animate-in fade-in slide-in-from-bottom-2 duration-300"
+                style={{ animationDelay: `${index * 50}ms` }}
               >
                 {savings >= 20 && (
-                  <span className="absolute top-0 right-0 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-bl-xl">
+                  <span className="absolute top-0 right-0 bg-gradient-to-r from-red-500 to-orange-500 text-white text-xs font-bold px-3 py-1.5 rounded-bl-xl rounded-tr-2xl">
                     {savings}% OFF
                   </span>
                 )}
 
-                <p className="font-black text-lg text-black pr-16">{deal.itemName}</p>
-                <p className="text-gray-500 text-sm">{deal.vendorName}</p>
+                <p className="font-black text-xl pr-16">{deal.itemName}</p>
+                <p className="text-neutral-400 text-sm mt-1">{deal.vendorName}</p>
 
-                <div className="flex items-end justify-between mt-3">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-black text-red-600">${deal.dealPrice.toFixed(2)}</span>
+                <div className="flex items-end justify-between mt-4">
+                  <div className="flex items-baseline gap-3">
+                    <span className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-orange-400">
+                      ${deal.dealPrice.toFixed(2)}
+                    </span>
                     {deal.originalPrice && (
-                      <span className="text-sm text-gray-400 line-through">${deal.originalPrice.toFixed(2)}</span>
+                      <span className="text-sm text-neutral-500 line-through">
+                        ${deal.originalPrice.toFixed(2)}
+                      </span>
                     )}
                   </div>
-                  <span className="text-xs font-semibold text-red-600 bg-red-100 px-2 py-1 rounded-full">
+                  <span className="text-xs font-bold text-red-400 bg-red-500/20 px-3 py-1.5 rounded-full border border-red-500/30">
                     {timeLeft}
                   </span>
                 </div>
 
                 {deal.distance_m && (
-                  <p className="text-xs text-gray-400 mt-2">{deal.distance_m}m away</p>
+                  <p className="text-xs text-neutral-500 mt-3">
+                    {deal.distance_m < 1000 ? `${deal.distance_m}m` : `${(deal.distance_m / 1000).toFixed(1)}km`} away
+                  </p>
                 )}
               </Link>
             );
