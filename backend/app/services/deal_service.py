@@ -1,62 +1,32 @@
-import uuid
-from datetime import datetime
 from app.db import SessionLocal
 from sqlalchemy import text
+from datetime import datetime
 
 
 class DealService:
-    def create_deal(self, payload):
+    def get_deals_nearby(self, lat: float, lng: float, limit: int = 20):
+        """Get active deals sorted by distance"""
         db = SessionLocal()
         try:
-            deal_id = f"d_{uuid.uuid4().hex[:8]}"
-            
-            # Parse expires_at
-            expires_at = payload.expiresAt
-            if isinstance(expires_at, str):
-                try:
-                    expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-                except:
-                    expires_at = datetime.utcnow()
-            
-            db.execute(
-                text("""
-                    INSERT INTO deals (id, vendor_id, item_name, original_price, deal_price, expires_at, location)
-                    SELECT :id, :vendor_id, :item_name, :original_price, :deal_price, :expires_at, location
-                    FROM vendors WHERE id = :vendor_id
-                """),
-                {
-                    "id": deal_id,
-                    "vendor_id": payload.vendorId,
-                    "item_name": payload.itemName,
-                    "original_price": getattr(payload, 'originalPrice', None),
-                    "deal_price": payload.dealPrice,
-                    "expires_at": expires_at
-                }
-            )
-            db.commit()
-            
-            return {"dealId": deal_id, "status": "active"}
-        finally:
-            db.close()
-
-    def find_nearby(self, lat: float, lng: float, limit: int = 10):
-        db = SessionLocal()
-        try:
-            rows = db.execute(
+            deals = db.execute(
                 text("""
                     SELECT 
-                        d.id, d.item_name, d.deal_price, d.original_price,
-                        d.vendor_id, v.name AS vendor_name,
+                        d.id as deal_id,
+                        d.vendor_id,
+                        d.item_name,
+                        d.original_price,
+                        d.deal_price,
+                        d.expires_at,
+                        v.name as vendor_name,
                         ST_Distance(
-                            d.location,
+                            d.location, 
                             ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography
-                        ) AS distance_m
+                        ) as distance_m
                     FROM deals d
-                    JOIN vendors v ON v.id = d.vendor_id
-                    WHERE d.expires_at > now() 
-                      AND d.is_active = true
-                      AND d.location IS NOT NULL
-                    ORDER BY distance_m
+                    LEFT JOIN vendors v ON v.id = d.vendor_id
+                    WHERE d.is_active = true 
+                    AND d.expires_at > NOW()
+                    ORDER BY distance_m ASC
                     LIMIT :limit
                 """),
                 {"lat": lat, "lng": lng, "limit": limit}
@@ -65,16 +35,66 @@ class DealService:
             return {
                 "deals": [
                     {
-                        "dealId": r.id,
-                        "item": r.item_name,
-                        "price": float(r.deal_price),
-                        "originalPrice": float(r.original_price) if r.original_price else None,
-                        "vendorId": r.vendor_id,
-                        "vendorName": r.vendor_name,
-                        "distance_m": int(r.distance_m) if r.distance_m else 0
+                        "dealId": d.deal_id,
+                        "vendorId": d.vendor_id,
+                        "vendorName": d.vendor_name,
+                        "itemName": d.item_name,
+                        "originalPrice": float(d.original_price) if d.original_price else None,
+                        "dealPrice": float(d.deal_price),
+                        "expiresAt": d.expires_at.isoformat() if d.expires_at else None,
+                        "distance_m": int(d.distance_m) if d.distance_m else None,
                     }
-                    for r in rows
+                    for d in deals
                 ]
             }
+        finally:
+            db.close()
+
+    def create_deal(self, data: dict):
+        """Create a new deal"""
+        db = SessionLocal()
+        try:
+            vendor_id = data["vendorId"]
+            item_name = data["itemName"]
+            deal_price = data["dealPrice"]
+            original_price = data.get("originalPrice")
+            expires_at = data.get("expiresAt")
+
+            # Get vendor location
+            vendor = db.execute(
+                text("SELECT location FROM vendors WHERE id = :vid"),
+                {"vid": vendor_id}
+            ).fetchone()
+
+            location = vendor.location if vendor else None
+
+            result = db.execute(
+                text("""
+                    INSERT INTO deals (id, vendor_id, item_name, original_price, deal_price, expires_at, location, is_active)
+                    VALUES (
+                        'd_' || substr(md5(random()::text), 1, 8),
+                        :vendor_id,
+                        :item_name,
+                        :original_price,
+                        :deal_price,
+                        :expires_at,
+                        :location,
+                        true
+                    )
+                    RETURNING id
+                """),
+                {
+                    "vendor_id": vendor_id,
+                    "item_name": item_name,
+                    "original_price": original_price,
+                    "deal_price": deal_price,
+                    "expires_at": expires_at,
+                    "location": location,
+                }
+            )
+            db.commit()
+            deal_id = result.fetchone()[0]
+
+            return {"dealId": deal_id, "status": "created"}
         finally:
             db.close()
