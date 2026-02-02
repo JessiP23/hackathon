@@ -16,12 +16,6 @@ export interface MenuItem {
   price: number;
   description?: string;
   isAvailable?: boolean;
-  flashDeal?: boolean;
-}
-
-export interface MatchingItem {
-  name: string;
-  price: number;
 }
 
 export interface Vendor {
@@ -32,16 +26,18 @@ export interface Vendor {
   businessHours?: string;
   location?: Location;
   menu?: MenuItem[];
+  matchingItems?: { name: string; price: number }[];
 }
 
 export interface Deal {
   dealId: string;
-  item: string;
-  price: number;
-  originalPrice?: number;
   vendorId: string;
-  vendorName: string;
-  distance_m: number;
+  vendorName?: string;
+  itemName: string;
+  dealPrice: number;
+  originalPrice?: number;
+  expiresAt: string;
+  distance_m?: number;
 }
 
 export interface Order {
@@ -50,17 +46,10 @@ export interface Order {
   vendorName?: string;
   customerPhone?: string;
   status: string;
-  items: OrderItem[];
+  items: { name: string; quantity: number; price?: number }[];
   total?: number;
   pickupCode?: string;
   createdAt?: string;
-}
-
-export interface OrderItem {
-  itemId: string;
-  name?: string;
-  quantity: number;
-  price?: number;
 }
 
 export interface VoiceResponse {
