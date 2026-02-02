@@ -22,7 +22,25 @@ app.include_router(voice.router, tags=["voice"])
 
 @app.get('/health')
 def health_check():
+	try:
+		import pyteserract
+		teserract_version = pyteserract.get_teserract_version()
+		teserract_ok = True
+	except Exception as e:
+		teserract_version = str(e)
+		teserract_ok = False
 	return {
 		"status": "healthy",
-		"service": "infrastreet-Pi"
+		"service": "infrastreet-Pi",
+		"teserract": {
+			"installes": teserract_ok,
+			"version": str(teserract_version)
+		}
+	}
+
+@app.get('/')
+def root():
+	return {
+		"message": "Infrastreet api",
+		"docs": "/docs"
 	}

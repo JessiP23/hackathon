@@ -51,11 +51,31 @@ export async function getVendorsNearby(
   return res.data;
 }
 
-export async function uploadMenu(vendorId: string, file: File): Promise<{ status: string; menuId: string }> {
+export async function uploadMenu(vendorId: string, file: File): Promise<{ 
+  status: string; 
+  itemsExtracted?: number;
+  items?: { itemId: string; name: string; price: number }[];
+  message?: string;
+}> {
   const formData = new FormData();
   formData.append("file", file);
   const res = await api.post(`/vendors/${vendorId}/menu`, formData, {
     headers: { "Content-Type": "multipart/form-data" },
+    timeout: 30000,
+  });
+  return res.data;
+}
+
+export async function addMenuItem(
+  vendorId: string,
+  itemName: string,
+  price: number,
+  description?: string
+): Promise<{ itemId: string; name: string; price: number }> {
+  const res = await api.post(`/vendors/${vendorId}/menu/item`, {
+    itemName,
+    price,
+    description: description || "",
   });
   return res.data;
 }

@@ -10,6 +10,15 @@ export interface User {
   name?: string;
 }
 
+export interface MenuItem {
+  itemId: string;
+  name: string;
+  price: number;
+  description?: string;
+  isAvailable?: boolean;
+  flashDeal?: boolean;
+}
+
 export interface Vendor {
   vendorId: string;
   name: string;
@@ -18,15 +27,6 @@ export interface Vendor {
   businessHours?: string;
   location?: Location;
   menu?: MenuItem[];
-}
-
-export interface MenuItem {
-  itemId: string;
-  name: string;
-  price: number;
-  description?: string;
-  isAvailable?: boolean;
-  flashDeal?: boolean;
 }
 
 export interface Deal {
