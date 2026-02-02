@@ -120,20 +120,14 @@ class VendorService:
         """
         Smart search: finds vendors by name OR menu items
         Ranking: menu match > name match > distance
-        Supports related terms (tacos -> taquitos, burrito, etc.)
         """
         db = SessionLocal()
         try:
             q = query.strip().lower()
-
-            # Expand search terms for food categories
             search_terms = self._expand_search(q)
-            print(f"Search: '{q}' expanded to {search_terms}")
+            print(f"[Search] '{q}' -> {search_terms} at ({lat}, {lng})")
 
-            # Build search pattern for SQL
-            patterns = [f"%{term}%" for term in search_terms]
-
-            # Get all nearby vendors with their menu items
+            # Get ALL vendors (no distance filter for demo)
             vendors_raw = db.execute(
                 text("""
                     SELECT v.id, v.name, v.phone, v.business_hours,
@@ -143,49 +137,48 @@ class VendorService:
                     FROM vendors v
                     WHERE v.location IS NOT NULL
                     ORDER BY dist
-                    LIMIT 50
+                    LIMIT 100
                 """),
                 {"lat": lat, "lng": lng}
             ).fetchall()
 
             results = []
             for v in vendors_raw:
-                # Get all menu items for this vendor
                 menu_items = db.execute(
-                    text("SELECT item_name, price FROM menus WHERE vendor_id = :vid"),
+                    text("SELECT id, item_name, price FROM menus WHERE vendor_id = :vid"),
                     {"vid": v.id}
                 ).fetchall()
 
-                # Calculate relevance score
                 score = 0
                 matching_items = []
 
-                # Check vendor name match
+                # Vendor name match
                 name_lower = v.name.lower()
                 for term in search_terms:
                     if term in name_lower:
-                        score += 100  # High score for name match
+                        score += 100
                         break
 
-                # Check menu items match
+                # Menu item match
                 for item in menu_items:
                     item_name_lower = item.item_name.lower()
                     for term in search_terms:
                         if term in item_name_lower:
-                            score += 50  # Good score for menu match
+                            score += 50
                             matching_items.append({
+                                "itemId": item.id,
                                 "name": item.item_name,
                                 "price": float(item.price)
                             })
                             break
 
-                # Skip if no match and query was provided
+                # Skip if no match when query provided
                 if q and score == 0:
                     continue
 
-                # Distance penalty (closer = better)
+                # Distance score (closer = better, but don't filter out)
                 dist = v.dist or 0
-                distance_score = max(0, 100 - (dist / 100))  # Lose 1 point per 100m
+                distance_score = max(0, 50 - (dist / 1000))  # Lose 1 point per km
                 score += distance_score
 
                 results.append({
@@ -195,17 +188,16 @@ class VendorService:
                     "businessHours": v.business_hours,
                     "distance_m": int(dist),
                     "location": {"lat": v.lat, "lng": v.lng} if v.lat else None,
-                    "matchingItems": matching_items[:5],  # Top 5 matches
+                    "matchingItems": matching_items[:3],
                     "score": score
                 })
 
-            # Sort by score (highest first), then by distance
             results.sort(key=lambda x: (-x["score"], x["distance_m"]))
 
-            # Remove score from response, limit results
             for r in results:
                 del r["score"]
 
+            print(f"[Search] Found {len(results)} results")
             return {"results": results[:limit]}
 
         finally:
