@@ -10,7 +10,7 @@ interface Props {}
 
 export default function VendorMenuPage({}: Props) {
   const params = useParams();
-  const vendorId = params.vendorId;
+  const vendorId = params.id as string;
 
   const [vendor, setVendor] = useState<Vendor | null>(null);
   const [location, setLocation] = useState<Location | null>(null);
@@ -20,7 +20,8 @@ export default function VendorMenuPage({}: Props) {
   useEffect(() => {
     async function fetchVendor() {
       setLoading(true);
-      const res = await axios.get(`${process.env.NEXT_PUBLIC_BACKEND_URL}/vendors/${vendorId}`);
+      const baseUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+      const res = await axios.get(`${baseUrl}/vendors/${vendorId}`);
       setVendor(res.data);
       setLoading(false);
     }

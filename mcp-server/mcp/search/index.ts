@@ -5,11 +5,11 @@ class SearchVendorInput {
     @SchemaConstraint({ description: "Food or product user is looking for" })
     query!: string;
 
-    @SchemaConstraint({ description: 'User latitute' })
+    @SchemaConstraint({ description: 'User latitude' })
     lat!: number;
 
-    @SchemaConstraint({ description: 'User longitute' })
-    lon!: number;
+    @SchemaConstraint({ description: 'User longitude' })
+    lng!: number;
 }
 
 export class SearchService {

@@ -5,14 +5,14 @@ class CreateVendorInput {
     @SchemaConstraint({ description: "Vendor name" })
     name!: string;
 
-    @SchemaConstraint({ description: "phone number" })
+    @SchemaConstraint({ description: "Phone number" })
     phone!: string;
 
-    @SchemaConstraint({ description: "Latitute" })
+    @SchemaConstraint({ description: "Latitude" })
     lat!: number;
 
     @SchemaConstraint({ description: "Longitude" })
-    lon!: number;
+    lng!: number;
 }
 
 class UploadMenuInput{
@@ -44,7 +44,7 @@ export class OnboardingService {
 
     async uploadMenu(input: UploadMenuInput) {
         const response = await axios.post(
-            `${process.env.BACKEND_URL}/vendors/menu`,
+            `${process.env.BACKEND_URL}/vendors/${input.vendorId}/menu`,
             input
         )
         return response.data

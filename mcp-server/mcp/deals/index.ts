@@ -1,12 +1,12 @@
 import { Tool, SchemaConstraint } from '@leanmcp/core'
 import axios from 'axios'
 
-class NearbyDealsInput{
-    @SchemaConstraint({ description: "Altitude" })
-    alt!: number;
+class NearbyDealsInput {
+    @SchemaConstraint({ description: "Latitude" })
+    lat!: number;
 
     @SchemaConstraint({ description: "Longitude" })
-    lon!: number;
+    lng!: number;
 }
 
 class CreateDealInput {

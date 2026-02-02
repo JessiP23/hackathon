@@ -7,13 +7,12 @@ class PlaceOrderInput {
 
     @SchemaConstraint({ description: "Order line items" })
     items!: {
-        name: string;
+        itemId: string;
         quantity: number;
-        price?: number;
     }[];
 
-    @SchemaConstraint({ description: "Customer phone number" })
-    customerPhone!: string;
+    @SchemaConstraint({ description: "Customer phone number (optional)" })
+    customerPhone?: string;
 }
 
 class OrderStatusInput {

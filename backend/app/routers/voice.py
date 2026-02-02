@@ -8,6 +8,6 @@ service = VoiceService()
 def handle_voice(payload: dict):
     transcript = payload["transcript"]
     lat = payload["lat"]
-    lon = payload["lon"]
+    lng = payload["lng"]
 
-    return service.process_voice_query(transcript, lat, lon)
+    return service.process_voice_query(transcript, lat, lng)
