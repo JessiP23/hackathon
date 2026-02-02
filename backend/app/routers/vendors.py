@@ -1,9 +1,15 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from pydantic import BaseModel
 from app.schemas.vendor import VendorCreate
 from app.services.vendor_service import VendorService
 
 router = APIRouter()
 service = VendorService()
+
+class AddItemRequest(BaseModel):
+    item_name: str
+    price: float
+    description: str = ''
 
 @router.post("")
 def create_vendor(payload: VendorCreate):
@@ -25,14 +31,12 @@ def get_vendor(vendor_id: str):
     return vendor
 
 @router.post("/{vendor_id}/menu")
-def upload_menu(vendor_id: str, file: UploadFile = File(...)):
-    return service.upload_menu(vendor_id, file)
+async def upload_menu(vendor_id: str, file: UploadFile = File(...)):
+    return await service.upload_menu(vendor_id, file)
 
 @router.post("/{vendor_id}/menu/item")
 def add_menu_item(
     vendor_id: str,
-    item_name: str = Query(...),
-    price: float = Query(...),
-    description: str = Query(None)
+    payload: AddItemRequest
 ):
-    return service.add_menu_item(vendor_id, item_name, price, description)
+    return service.add_menu_item(vendor_id, payload.item_name, payload.price, payload.description)
