@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import vendors, orders, deals, voice
+from app.routers import vendors, orders, deals, voice, user
 
 app = FastAPI(title="InfraStreet API")
 
@@ -14,7 +14,15 @@ app.add_middleware(
 	allow_headers=["*"],
 )
 
+app.include_router(user.router, prefix="/users", tags=["users"])
 app.include_router(vendors.router, prefix="/vendors", tags=["vendors"])
 app.include_router(orders.router, prefix="/orders", tags=["orders"])
 app.include_router(deals.router, prefix="/deals", tags=["deals"])
 app.include_router(voice.router, tags=["voice"])
+
+@app.get('/health')
+def health_check():
+	return {
+		"status": "healthy",
+		"service": "infrastreet-Pi"
+	}

@@ -5,7 +5,11 @@ class VendorCreate(BaseModel):
     phone: str
     lat: float
     lng: float
+    businessHours: str | None = None
 
 class MenuUpload(BaseModel):
     vendorId: str
-    menuImage: str
+    name: str
+    phone: str
+    distance_m: int | None = None
+    menu: list | None = None
