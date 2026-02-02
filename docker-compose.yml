@@ -1,45 +1,8 @@
-version: "3.9"
+version: "3.8"
 
 services:
-  db:
-    image: postgis/postgis:15-3.3
-    container_name: infrastreet-db
-    environment:
-      POSTGRES_DB: infrastreet
-      POSTGRES_USER: infrastreet
-      POSTGRES_PASSWORD: infrastreet
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
   redis:
-    image: redis:7
+    image: redis:7-alpine
     container_name: infrastreet-redis
     ports:
       - "6379:6379"
-
-  backend:
-    build: ./backend
-    container_name: infrastreet-backend
-    environment:
-      - DATABASE_URL=postgresql://infrastreet:infrastreet@db:5432/infrastreet
-      - MCP_SERVER_URL=http://mcp-server:3001/mcp
-      - CORS_ORIGINS=http://localhost:3000
-    depends_on:
-      - db
-      - redis
-      - mcp-server
-    ports:
-      - "8000:8000"
-
-  mcp-server:
-    build: ./mcp-server
-    container_name: infrastreet-mcp
-    environment:
-      - BACKEND_URL=http://backend:8000
-    ports:
-      - "3001:3001"
-
-volumes:
-  pgdata:
