@@ -115,7 +115,7 @@ export default function VendorDashboardPage() {
   if (!vendor) return null;
 
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className="min-h-screen bg-gray-50 text-black">
       <div className="bg-black text-white p-6">
         <div className="flex justify-between items-start">
           <div>
