@@ -52,7 +52,7 @@ export default function SearchPage() {
   }
 
   return (
-    <main className="relative min-h-screen pb-24">
+    <main className="relative min-h-screen pb-24 text-black">
       <MapView vendors={vendors} userLocation={location} />
 
       <div className="p-4 space-y-3">
