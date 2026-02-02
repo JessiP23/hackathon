@@ -19,6 +19,11 @@ export interface MenuItem {
   flashDeal?: boolean;
 }
 
+export interface MatchingItem {
+  name: string;
+  price: number;
+}
+
 export interface Vendor {
   vendorId: string;
   name: string;
@@ -42,9 +47,13 @@ export interface Deal {
 export interface Order {
   orderId: string;
   vendorId: string;
-  items: OrderItem[];
-  total: number;
+  vendorName?: string;
+  customerPhone?: string;
   status: string;
+  items: OrderItem[];
+  total?: number;
+  pickupCode?: string;
+  createdAt?: string;
 }
 
 export interface OrderItem {

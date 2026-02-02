@@ -1,14 +1,14 @@
 import axios from "axios";
-import { User, Vendor, Deal, Order, VoiceResponse } from "../shared/types";
+import { User, Vendor, Deal, Order } from "../shared/types";
 
 const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 10000,
+  headers: { "Content-Type": "application/json" },
 });
 
-// User endpoints
+// Users
 export async function registerUser(phone: string, role: "customer" | "vendor", name?: string): Promise<User & { isExisting: boolean }> {
   const res = await api.post("/users", { phone, role, name });
   return res.data;
@@ -16,14 +16,14 @@ export async function registerUser(phone: string, role: "customer" | "vendor", n
 
 export async function getUserByPhone(phone: string): Promise<User | null> {
   try {
-    const res = await api.get(`/users/phone/${encodeURIComponent(phone)}`);
+    const res = await api.get(`/users/phone/${phone}`);
     return res.data;
   } catch {
     return null;
   }
 }
 
-// Vendor endpoints
+// Vendors
 export async function createVendor(data: {
   name: string;
   phone: string;
@@ -40,23 +40,12 @@ export async function getVendor(vendorId: string): Promise<Vendor> {
   return res.data;
 }
 
-export async function getVendorsNearby(
-  query: string,
-  lat: number,
-  lng: number
-): Promise<{ results: Vendor[] }> {
-  const res = await api.get("/vendors/nearby", {
-    params: { query, lat, lng },
-  });
+export async function getVendorsNearby(query: string, lat: number, lng: number): Promise<{ results: Vendor[] }> {
+  const res = await api.get("/vendors/nearby", { params: { query, lat, lng } });
   return res.data;
 }
 
-export async function uploadMenu(vendorId: string, file: File): Promise<{ 
-  status: string; 
-  itemsExtracted?: number;
-  items?: { itemId: string; name: string; price: number }[];
-  message?: string;
-}> {
+export async function uploadMenu(vendorId: string, file: File) {
   const formData = new FormData();
   formData.append("file", file);
   const res = await api.post(`/vendors/${vendorId}/menu`, formData, {
@@ -66,44 +55,16 @@ export async function uploadMenu(vendorId: string, file: File): Promise<{
   return res.data;
 }
 
-export async function addMenuItem(
-  vendorId: string,
-  itemName: string,
-  price: number,
-  description?: string
-): Promise<{ itemId: string; name: string; price: number }> {
-  const res = await api.post(`/vendors/${vendorId}/menu/item`, {
-    itemName,
-    price,
-    description: description || "",
-  });
+export async function addMenuItem(vendorId: string, itemName: string, price: number, description?: string) {
+  const res = await api.post(`/vendors/${vendorId}/menu/item`, { itemName, price, description: description || "" });
   return res.data;
 }
 
-// Deal endpoints
-export async function getDeals(lat: number, lng: number): Promise<{ deals: Deal[] }> {
-  const res = await api.get("/deals", { params: { lat, lng } });
-  return res.data;
-}
-
-export async function createDeal(data: {
-  vendorId: string;
-  itemName: string;
-  dealPrice: number;
-  originalPrice?: number;
-  expiresAt: string;
-}): Promise<{ dealId: string }> {
-  const res = await api.post("/deals", data);
-  return res.data;
-}
-
-// Order endpoints
+// Orders
 export async function placeOrder(data: {
   vendorId: string;
-  items: { itemId: string; quantity: number }[];
   customerPhone?: string;
-  lat?: number;
-  lng?: number;
+  items: { itemId: string; quantity: number }[];
 }): Promise<Order> {
   const res = await api.post("/orders", data);
   return res.data;
@@ -114,12 +75,34 @@ export async function getOrder(orderId: string): Promise<Order> {
   return res.data;
 }
 
-// Voice endpoint
-export async function sendVoiceTranscript(
-  transcript: string,
-  lat: number,
-  lng: number
-): Promise<VoiceResponse> {
-  const res = await api.post("/voice", { transcript, lat, lng });
+export async function getVendorOrders(vendorId: string): Promise<Order[]> {
+  const res = await api.get(`/orders/vendor/${vendorId}`);
+  return res.data;
+}
+
+export async function getCustomerOrders(phone: string): Promise<Order[]> {
+  const res = await api.get(`/orders/customer/${phone}`);
+  return res.data;
+}
+
+export async function updateOrderStatus(orderId: string, status: string) {
+  const res = await api.patch(`/orders/${orderId}/status`, { status });
+  return res.data;
+}
+
+// Deals
+export async function createDeal(data: {
+  vendorId: string;
+  itemName: string;
+  dealPrice: number;
+  originalPrice?: number;
+  expiresAt: string;
+}): Promise<Deal> {
+  const res = await api.post("/deals", data);
+  return res.data;
+}
+
+export async function getDealsNearby(lat: number, lng: number): Promise<Deal[]> {
+  const res = await api.get("/deals", { params: { lat, lng } });
   return res.data;
 }

@@ -10,11 +10,10 @@ export default function LandingPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check if user is already registered
-    const storedPhone = localStorage.getItem("infrastreet_phone");
-    if (storedPhone) {
-      getUserByPhone(storedPhone)
-        .then((u) => setUser(u))
+    const phone = localStorage.getItem("infrastreet_phone");
+    if (phone) {
+      getUserByPhone(phone)
+        .then(setUser)
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -23,21 +22,19 @@ export default function LandingPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-gradient-to-b from-orange-50 to-white">
-        <div className="animate-pulse text-gray-500">Loading...</div>
+      <main className="min-h-screen flex items-center justify-center bg-white">
+        <div className="w-8 h-8 border-2 border-black border-t-transparent rounded-full animate-spin" />
       </main>
     );
   }
 
-  // Returning user - show quick actions
   if (user) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-orange-50 to-white p-6">
-        <div className="max-w-md mx-auto pt-12 space-y-8">
+      <main className="min-h-screen bg-white p-6">
+        <div className="max-w-md mx-auto pt-16 space-y-8">
           <div className="text-center">
-            <div className="text-5xl mb-4">🍜</div>
-            <h1 className="text-2xl font-bold">Welcome back!</h1>
-            <p className="text-gray-600">{user.name || user.phone}</p>
+            <h1 className="text-3xl font-bold">Hey{user.name ? `, ${user.name}` : ""}!</h1>
+            <p className="text-gray-500 mt-1">What are you craving?</p>
           </div>
 
           <div className="space-y-3">
@@ -45,101 +42,86 @@ export default function LandingPage() {
               <>
                 <Link
                   href="/vendor-dashboard"
-                  className="block w-full bg-black text-white py-4 rounded-xl text-center text-lg font-medium"
+                  className="block w-full bg-black text-white py-5 rounded-2xl text-center text-lg font-semibold"
                 >
-                  📊 Go to Dashboard
+                  Open Dashboard
                 </Link>
                 <Link
-                  href="/deals"
-                  className="block w-full border-2 border-black py-4 rounded-xl text-center text-lg font-medium"
+                  href="/search"
+                  className="block w-full border-2 border-gray-200 py-5 rounded-2xl text-center text-lg font-medium"
                 >
-                  🔥 View Local Deals
+                  Browse Food
                 </Link>
               </>
             ) : (
               <>
                 <Link
                   href="/search"
-                  className="block w-full bg-black text-white py-4 rounded-xl text-center text-lg font-medium"
+                  className="block w-full bg-black text-white py-5 rounded-2xl text-center text-lg font-semibold"
                 >
-                  🎤 Find Food Nearby
+                  Find Food
                 </Link>
                 <Link
                   href="/deals"
-                  className="block w-full border-2 border-black py-4 rounded-xl text-center text-lg font-medium"
+                  className="block w-full border-2 border-gray-200 py-5 rounded-2xl text-center text-lg font-medium"
                 >
-                  🔥 Flash Deals
+                  View Deals
                 </Link>
               </>
             )}
-
-            <button
-              onClick={() => {
-                localStorage.removeItem("infrastreet_phone");
-                localStorage.removeItem("infrastreet_user");
-                localStorage.removeItem("infrastreet_vendor_id");
-                setUser(null);
-              }}
-              className="block w-full text-gray-500 py-3 text-center text-sm"
-            >
-              Sign out
-            </button>
           </div>
+
+          <button
+            onClick={() => {
+              localStorage.clear();
+              setUser(null);
+            }}
+            className="w-full text-gray-400 text-sm py-4"
+          >
+            Sign out
+          </button>
         </div>
       </main>
     );
   }
 
-  // New user - show role selection
   return (
-    <main className="min-h-screen bg-gradient-to-b from-orange-50 to-white">
-      <div className="max-w-md mx-auto px-6 pt-16 pb-12 space-y-12">
-        {/* Hero */}
+    <main className="min-h-screen bg-white text-black">
+      <div className="max-w-md mx-auto px-6 pt-24 pb-12 space-y-16">
         <div className="text-center space-y-4">
-          <div className="text-6xl">🍜</div>
-          <h1 className="text-4xl font-bold tracking-tight">InfraStreet</h1>
-          <p className="text-lg text-gray-600">
-            Voice-first marketplace for street food
-          </p>
+          <h1 className="text-5xl font-black tracking-tight">InfraStreet</h1>
+          <p className="text-xl text-gray-500">Street food, one tap away</p>
         </div>
 
-        {/* Value props */}
-        <div className="space-y-3 text-center text-sm text-gray-600">
-          <div className="flex items-center justify-center gap-2">
-            <span>🎤</span>
-            <span>Just talk — find food instantly</span>
+        <div className="space-y-6 text-center">
+          <div className="space-y-2">
+            <p className="text-2xl font-medium">Speak to search</p>
+            <p className="text-gray-500">Just say what you want</p>
           </div>
-          <div className="flex items-center justify-center gap-2">
-            <span>📍</span>
-            <span>Discover hidden gems nearby</span>
+          <div className="space-y-2">
+            <p className="text-2xl font-medium">Order instantly</p>
+            <p className="text-gray-500">Get a pickup code in seconds</p>
           </div>
-          <div className="flex items-center justify-center gap-2">
-            <span>⚡</span>
-            <span>Flash deals from local vendors</span>
+          <div className="space-y-2">
+            <p className="text-2xl font-medium">Support local</p>
+            <p className="text-gray-500">Discover hidden gems nearby</p>
           </div>
         </div>
 
-        {/* Role Selection */}
-        <div className="space-y-4">
+        <div className="space-y-3">
           <Link
             href="/customer-onboarding"
-            className="block w-full bg-black text-white py-4 rounded-xl text-center text-lg font-medium hover:bg-gray-800 transition shadow-lg"
+            className="block w-full bg-black text-white py-5 rounded-2xl text-center text-lg font-semibold"
           >
-            🛒 I'm looking for food
+            Find Food
           </Link>
-
           <Link
             href="/vendor-onboarding"
-            className="block w-full border-2 border-black py-4 rounded-xl text-center text-lg font-medium hover:bg-gray-50 transition"
+            className="block w-full border-2 border-black py-5 rounded-2xl text-center text-lg font-semibold"
           >
-            🏪 I'm a street vendor
+            I'm a Vendor
           </Link>
         </div>
-
-        {/* Footer */}
-        <p className="text-center text-xs text-gray-400">
-          Bringing street food online — no app download needed
-        </p>
       </div>
     </main>
   );

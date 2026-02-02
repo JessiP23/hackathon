@@ -24,9 +24,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang='en'>
-      <body className="bg-gray-50 text-gray-900">
+      <body className="bg-gray-50 text-black">
         <header className="p-4 border-b bg-white shadow-sm">
-          <div className="font-semibold text-lg">InfraStreet</div>
+          <div className="font-semibold text-lg text-black">InfraStreet</div>
         </header>
         {children}
       </body>
