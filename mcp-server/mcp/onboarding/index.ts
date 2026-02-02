@@ -1,10 +1,11 @@
-import { SchemaConstraint, Tool } from "@leanmcp/core";
+import { Tool, SchemaConstraint } from "@leanmcp/core";
 import axios from "axios";
+import FormData from "form-data";
 
-const BACKEND_URL = process.env.BACKEND_URL || "http://backend:8000";
+const BACKEND = process.env.BACKEND_URL || "http://backend:8000";
 
 class CreateVendorInput {
-  @SchemaConstraint({ description: "Vendor/business name" })
+  @SchemaConstraint({ description: "Business name" })
   name: string = "";
 
   @SchemaConstraint({ description: "Phone number" })
@@ -16,19 +17,30 @@ class CreateVendorInput {
   @SchemaConstraint({ description: "Longitude" })
   lng: number = 0;
 
-  @SchemaConstraint({ description: "Business hours" })
+  @SchemaConstraint({ description: "Business hours (e.g., '9am-5pm')" })
   businessHours: string = "";
 }
 
-class UploadMenuInput {
+class ProcessMenuInput {
   @SchemaConstraint({ description: "Vendor ID" })
   vendorId: string = "";
 
   @SchemaConstraint({ description: "Base64 encoded menu image" })
   imageBase64: string = "";
+}
 
-  @SchemaConstraint({ description: "Image filename" })
-  filename: string = "";
+class AddItemInput {
+  @SchemaConstraint({ description: "Vendor ID" })
+  vendorId: string = "";
+
+  @SchemaConstraint({ description: "Item name" })
+  itemName: string = "";
+
+  @SchemaConstraint({ description: "Price" })
+  price: number = 0;
+
+  @SchemaConstraint({ description: "Description" })
+  description: string = "";
 }
 
 export class OnboardingService {
@@ -38,30 +50,113 @@ export class OnboardingService {
   })
   async createVendor(input: CreateVendorInput) {
     try {
-      const response = await axios.post(`${BACKEND_URL}/vendors`, {
+      const res = await axios.post(`${BACKEND}/vendors`, {
         name: input.name,
         phone: input.phone,
         lat: input.lat,
         lng: input.lng,
         businessHours: input.businessHours || undefined,
       });
-      return response.data;
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error("Create vendor error:", msg);
-      return { error: msg };
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            success: true,
+            vendorId: res.data.vendorId,
+            message: `Registered "${input.name}". Now upload a menu image.`
+          })
+        }]
+      };
+    } catch (e: unknown) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({ success: false, error: String(e) })
+        }]
+      };
     }
   }
 
   @Tool({
-    description: "Upload and process a menu image",
-    inputClass: UploadMenuInput,
+    description: "Process menu image with OCR to extract items automatically",
+    inputClass: ProcessMenuInput,
   })
-  async uploadMenu(input: UploadMenuInput) {
-    return {
-      status: "processing",
-      vendorId: input.vendorId,
-      message: "Menu image received. OCR processing not yet implemented.",
-    };
+  async processMenuImage(input: ProcessMenuInput) {
+    try {
+      const buffer = Buffer.from(input.imageBase64, "base64");
+      const form = new FormData();
+      form.append("file", buffer, { filename: "menu.jpg", contentType: "image/jpeg" });
+
+      const res = await axios.post(
+        `${BACKEND}/vendors/${input.vendorId}/menu`,
+        form,
+        { headers: form.getHeaders(), timeout: 30000 }
+      );
+
+      const data = res.data;
+
+      if (data.itemsExtracted > 0) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              success: true,
+              message: `Extracted ${data.itemsExtracted} menu items via OCR`,
+              items: data.items
+            })
+          }]
+        };
+      } else {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              success: false,
+              message: "No items found. Try clearer image or add manually."
+            })
+          }]
+        };
+      }
+    } catch (e: unknown) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({ success: false, error: String(e) })
+        }]
+      };
+    }
+  }
+
+  @Tool({
+    description: "Add a single menu item manually",
+    inputClass: AddItemInput,
+  })
+  async addMenuItem(input: AddItemInput) {
+    try {
+      const res = await axios.post(`${BACKEND}/vendors/${input.vendorId}/menu/item`, {
+        itemName: input.itemName,
+        price: input.price,
+        description: input.description,
+      });
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            success: true,
+            message: `Added "${input.itemName}" ($${input.price})`,
+            itemId: res.data.itemId
+          })
+        }]
+      };
+    } catch (e: unknown) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({ success: false, error: String(e) })
+        }]
+      };
+    }
   }
 }
