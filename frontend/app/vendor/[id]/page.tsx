@@ -112,7 +112,7 @@ export default function VendorMenuPage() {
   const cartTotal = getCartTotal();
 
   return (
-    <main className="min-h-screen pb-24">
+    <main className="min-h-screen pb-24 text-black">
       {/* Header */}
       <div className="bg-black text-white p-6">
         <Link href="/search" className="text-sm text-gray-300 mb-2 block">

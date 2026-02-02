@@ -72,12 +72,9 @@ class VendorService:
             db.close()
 
     async def upload_menu(self, vendor_id: str, file):
-        """Upload menu image → OCR → insert items"""
         db = SessionLocal()
         try:
             content = await file.read()
-
-            # Extract items via OCR
             items = ocr.extract_items(content)
 
             inserted = []
@@ -95,18 +92,11 @@ class VendorService:
 
             db.commit()
 
-            if inserted:
-                return {
-                    "status": "success",
-                    "itemsExtracted": len(inserted),
-                    "items": inserted
-                }
-            else:
-                return {
-                    "status": "no_items",
-                    "itemsExtracted": 0,
-                    "message": "Could not extract items. Try a clearer image or add manually."
-                }
+            return {
+                "status": "success" if inserted else "no_items",
+                "itemsExtracted": len(inserted),
+                "items": inserted
+            }
         finally:
             db.close()
 
@@ -126,31 +116,137 @@ class VendorService:
         finally:
             db.close()
 
-    def search_nearby(self, query: str, lat: float, lng: float, limit: int = 10):
+    def search_nearby(self, query: str, lat: float, lng: float, limit: int = 20):
+        """
+        Smart search: finds vendors by name OR menu items
+        Ranking: menu match > name match > distance
+        Supports related terms (tacos -> taquitos, burrito, etc.)
+        """
         db = SessionLocal()
         try:
-            rows = db.execute(
+            q = query.strip().lower()
+
+            # Expand search terms for food categories
+            search_terms = self._expand_search(q)
+            print(f"Search: '{q}' expanded to {search_terms}")
+
+            # Build search pattern for SQL
+            patterns = [f"%{term}%" for term in search_terms]
+
+            # Get all nearby vendors with their menu items
+            vendors_raw = db.execute(
                 text("""
-                    SELECT DISTINCT v.id, v.name,
+                    SELECT v.id, v.name, v.phone, v.business_hours,
+                           ST_Y(v.location::geometry) as lat,
+                           ST_X(v.location::geometry) as lng,
                            ST_Distance(v.location, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography) AS dist
                     FROM vendors v
-                    LEFT JOIN menus m ON m.vendor_id = v.id
                     WHERE v.location IS NOT NULL
-                      AND (:q = '' OR v.name ILIKE '%' || :q || '%' OR m.item_name ILIKE '%' || :q || '%')
-                    ORDER BY dist LIMIT :lim
+                    ORDER BY dist
+                    LIMIT 50
                 """),
-                {"lat": lat, "lng": lng, "q": query or "", "lim": limit}
+                {"lat": lat, "lng": lng}
             ).fetchall()
 
-            return {
-                "results": [
-                    {
-                        "vendorId": r.id,
-                        "name": r.name,
-                        "distance_m": int(r.dist) if r.dist else 0
-                    }
-                    for r in rows
-                ]
-            }
+            results = []
+            for v in vendors_raw:
+                # Get all menu items for this vendor
+                menu_items = db.execute(
+                    text("SELECT item_name, price FROM menus WHERE vendor_id = :vid"),
+                    {"vid": v.id}
+                ).fetchall()
+
+                # Calculate relevance score
+                score = 0
+                matching_items = []
+
+                # Check vendor name match
+                name_lower = v.name.lower()
+                for term in search_terms:
+                    if term in name_lower:
+                        score += 100  # High score for name match
+                        break
+
+                # Check menu items match
+                for item in menu_items:
+                    item_name_lower = item.item_name.lower()
+                    for term in search_terms:
+                        if term in item_name_lower:
+                            score += 50  # Good score for menu match
+                            matching_items.append({
+                                "name": item.item_name,
+                                "price": float(item.price)
+                            })
+                            break
+
+                # Skip if no match and query was provided
+                if q and score == 0:
+                    continue
+
+                # Distance penalty (closer = better)
+                dist = v.dist or 0
+                distance_score = max(0, 100 - (dist / 100))  # Lose 1 point per 100m
+                score += distance_score
+
+                results.append({
+                    "vendorId": v.id,
+                    "name": v.name,
+                    "phone": v.phone,
+                    "businessHours": v.business_hours,
+                    "distance_m": int(dist),
+                    "location": {"lat": v.lat, "lng": v.lng} if v.lat else None,
+                    "matchingItems": matching_items[:5],  # Top 5 matches
+                    "score": score
+                })
+
+            # Sort by score (highest first), then by distance
+            results.sort(key=lambda x: (-x["score"], x["distance_m"]))
+
+            # Remove score from response, limit results
+            for r in results:
+                del r["score"]
+
+            return {"results": results[:limit]}
+
         finally:
             db.close()
+
+    def _expand_search(self, query: str) -> list[str]:
+        """Expand search to related food terms"""
+        if not query:
+            return [""]
+
+        # Food category mappings
+        expansions = {
+            "taco": ["taco", "taquito", "tortilla"],
+            "burrito": ["burrito", "wrap", "bowl"],
+            "nacho": ["nacho", "chip", "queso"],
+            "chicken": ["chicken", "pollo"],
+            "beef": ["beef", "carne", "steak", "asada"],
+            "pork": ["pork", "carnitas", "al pastor"],
+            "fish": ["fish", "pescado", "seafood", "shrimp", "camarones"],
+            "mexican": ["taco", "burrito", "nacho", "enchilada", "quesadilla"],
+            "chinese": ["noodle", "rice", "wok", "dumpling", "lo mein"],
+            "pizza": ["pizza", "slice", "pie"],
+            "burger": ["burger", "hamburger", "cheeseburger"],
+            "sandwich": ["sandwich", "sub", "hoagie", "panini"],
+            "salad": ["salad", "greens", "bowl"],
+            "breakfast": ["egg", "bacon", "pancake", "waffle", "toast"],
+        }
+
+        terms = [query]
+
+        # Check if query matches any category
+        for key, related in expansions.items():
+            if key in query or query in key:
+                terms.extend(related)
+
+        # Remove duplicates, keep order
+        seen = set()
+        unique = []
+        for t in terms:
+            if t not in seen:
+                seen.add(t)
+                unique.append(t)
+
+        return unique

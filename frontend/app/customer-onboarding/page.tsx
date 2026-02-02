@@ -37,7 +37,7 @@ export default function CustomerOnboardingPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-orange-50 to-white flex flex-col">
+    <main className="min-h-screen bg-gradient-to-b from-orange-50 to-white flex flex-col text-black">
       {/* Back button */}
       <div className="p-4">
         <Link href="/" className="text-gray-500 hover:text-black">
