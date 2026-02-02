@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getCurrentLocation } from "@/app/services/location";
 import { sendVoiceTranscript } from "@/app/services/voice";
 import VoiceDial from "@/app/components/VoiceDial";
+import MapView from "@/app/components/MapView";
 import { Vendor, Location, VoiceResponse } from "@/app/shared/types";
 
 export default function SearchPage() {
@@ -13,6 +14,8 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [transcript, setTranscript] = useState("");
+  const [hoveredVendor, setHoveredVendor] = useState<string | null>(null);
+  const [showMap, setShowMap] = useState(false);
 
   useEffect(() => {
     getCurrentLocation()
@@ -30,6 +33,7 @@ export default function SearchPage() {
       const res: VoiceResponse = await sendVoiceTranscript(text, location.lat, location.lng);
       setVendors(res.results || []);
       setMessage(res.message);
+      if (res.results && res.results.length > 0) setShowMap(true);
     } catch {
       setMessage("Search failed. Try again.");
     } finally {
@@ -38,16 +42,14 @@ export default function SearchPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-neutral-950 via-neutral-900 to-neutral-950 text-white">
+    <main className="min-h-screen bg-neutral-950 text-white">
       {/* Header */}
       <header className="sticky top-0 z-20 backdrop-blur-xl bg-neutral-950/80 border-b border-white/5">
         <div className="max-w-lg mx-auto px-5 py-4 flex items-center justify-between">
           <Link href="/" className="text-neutral-500 hover:text-white transition-colors text-sm font-medium">
             Back
           </Link>
-          <div className="absolute left-1/2 -translate-x-1/2">
-            <span className="text-lg font-black tracking-tight">InfraStreet</span>
-          </div>
+          <span className="text-lg font-black tracking-tight">InfraStreet</span>
           <Link href="/deals" className="text-red-500 text-sm font-semibold">
             Deals
           </Link>
@@ -55,22 +57,44 @@ export default function SearchPage() {
       </header>
 
       {/* Content */}
-      <div className="max-w-lg mx-auto px-5 pt-8 pb-40">
-        {/* Transcript bubble */}
+      <div className="max-w-lg mx-auto px-5 pt-6 pb-40">
+        {/* Transcript */}
         {transcript && (
-          <div className="mb-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="inline-block bg-white/10 backdrop-blur-sm rounded-2xl px-5 py-3 border border-white/10">
+          <div className="mb-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="inline-block bg-white/10 rounded-2xl px-5 py-3 border border-white/10">
               <p className="text-sm text-neutral-300">
-                <span className="text-neutral-500 mr-2">You said:</span>
-                "{transcript}"
+                <span className="text-neutral-500 mr-2">You said:</span>"{transcript}"
               </p>
             </div>
           </div>
         )}
 
+        {/* Map Toggle */}
+        {vendors.length > 0 && (
+          <div className="mb-4">
+            <button
+              onClick={() => setShowMap(!showMap)}
+              className="text-sm text-neutral-400 hover:text-white transition-colors"
+            >
+              {showMap ? "Hide Map" : "Show Map"}
+            </button>
+          </div>
+        )}
+
+        {/* Map */}
+        {showMap && vendors.length > 0 && (
+          <div className="mb-6 rounded-2xl overflow-hidden border border-white/10 animate-in fade-in duration-300">
+            <MapView
+              vendors={vendors}
+              userLocation={location}
+              highlightedVendor={hoveredVendor}
+            />
+          </div>
+        )}
+
         {/* Loading */}
         {loading && (
-          <div className="flex flex-col items-center justify-center py-24 animate-in fade-in duration-300">
+          <div className="flex flex-col items-center justify-center py-24">
             <div className="relative">
               <div className="w-16 h-16 rounded-full border-2 border-white/10" />
               <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-transparent border-t-white animate-spin" />
@@ -81,29 +105,24 @@ export default function SearchPage() {
 
         {/* Message */}
         {message && !loading && vendors.length === 0 && (
-          <div className="text-center py-8 animate-in fade-in duration-300">
+          <div className="text-center py-8">
             <p className="text-neutral-400">{message}</p>
           </div>
         )}
 
-        {/* Empty state */}
+        {/* Empty */}
         {vendors.length === 0 && !loading && !message && (
-          <div className="text-center py-20 animate-in fade-in duration-500">
+          <div className="text-center py-20">
             <div className="mb-8">
               <div className="w-24 h-24 mx-auto rounded-full bg-gradient-to-br from-red-500/20 to-orange-500/20 flex items-center justify-center border border-white/5">
                 <div className="w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-orange-500 animate-pulse" />
               </div>
             </div>
-            <h2 className="text-3xl font-black mb-3 bg-gradient-to-r from-white to-neutral-400 bg-clip-text text-transparent">
-              What are you craving?
-            </h2>
+            <h2 className="text-3xl font-black mb-3">What are you craving?</h2>
             <p className="text-neutral-500 text-lg">Hold the button and speak</p>
             <div className="mt-8 flex flex-wrap justify-center gap-2">
               {["tacos", "ramen", "pizza", "empanadas", "falafel"].map((food) => (
-                <span
-                  key={food}
-                  className="px-4 py-2 rounded-full bg-white/5 text-neutral-400 text-sm border border-white/5"
-                >
+                <span key={food} className="px-4 py-2 rounded-full bg-white/5 text-neutral-400 text-sm border border-white/5">
                   {food}
                 </span>
               ))}
@@ -119,7 +138,7 @@ export default function SearchPage() {
                 {vendors.length} {vendors.length === 1 ? "result" : "results"}
               </h3>
               <button
-                onClick={() => { setVendors([]); setTranscript(""); setMessage(""); }}
+                onClick={() => { setVendors([]); setTranscript(""); setMessage(""); setShowMap(false); }}
                 className="text-neutral-500 text-sm hover:text-white transition-colors"
               >
                 Clear
@@ -133,11 +152,14 @@ export default function SearchPage() {
                   href={`/vendor/${v.vendorId}`}
                   className="block group animate-in fade-in slide-in-from-bottom-2 duration-300"
                   style={{ animationDelay: `${index * 50}ms` }}
+                  onMouseEnter={() => setHoveredVendor(v.vendorId)}
+                  onMouseLeave={() => setHoveredVendor(null)}
                 >
-                  <div className="relative bg-gradient-to-br from-white/[0.08] to-white/[0.02] rounded-3xl p-5 border border-white/10 hover:border-white/20 transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl hover:shadow-white/5">
-                    {/* Distance badge */}
+                  <div className={`relative bg-white/5 rounded-2xl p-5 border transition-all duration-300 hover:scale-[1.02] ${
+                    hoveredVendor === v.vendorId ? "border-white/30 bg-white/10" : "border-white/10"
+                  }`}>
                     {v.distance_m && (
-                      <div className="absolute top-4 right-4 bg-white/10 backdrop-blur-sm px-3 py-1 rounded-full">
+                      <div className="absolute top-4 right-4 bg-white/10 px-3 py-1 rounded-full">
                         <span className="text-xs font-medium text-neutral-300">
                           {v.distance_m < 1000 ? `${v.distance_m}m` : `${(v.distance_m / 1000).toFixed(1)}km`}
                         </span>
@@ -145,22 +167,16 @@ export default function SearchPage() {
                     )}
 
                     <div className="pr-16">
-                      <h3 className="text-xl font-bold text-white group-hover:text-white transition-colors">
-                        {v.name}
-                      </h3>
+                      <h3 className="text-xl font-bold">{v.name}</h3>
                       {v.businessHours && (
                         <p className="text-neutral-500 text-sm mt-1">{v.businessHours}</p>
                       )}
                     </div>
 
-                    {/* Matching items */}
                     {v.matchingItems && v.matchingItems.length > 0 && (
                       <div className="mt-4 flex flex-wrap gap-2">
                         {v.matchingItems.slice(0, 3).map((item, i) => (
-                          <div
-                            key={i}
-                            className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-xl px-3 py-1.5"
-                          >
+                          <div key={i} className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-xl px-3 py-1.5">
                             <span className="text-sm text-green-400">{item.name}</span>
                             <span className="text-xs text-green-500/70">${item.price.toFixed(2)}</span>
                           </div>
@@ -168,7 +184,6 @@ export default function SearchPage() {
                       </div>
                     )}
 
-                    {/* Arrow */}
                     <div className="absolute bottom-5 right-5 w-8 h-8 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
                       <span className="text-neutral-400 group-hover:text-white transition-colors">→</span>
                     </div>
