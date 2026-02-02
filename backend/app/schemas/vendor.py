@@ -4,7 +4,7 @@ class VendorCreate(BaseModel):
     name: str
     phone: str
     lat: float
-    lon: float
+    lng: float
 
 class MenuUpload(BaseModel):
     vendorId: str

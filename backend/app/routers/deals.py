@@ -9,6 +9,10 @@ service = DealService()
 def create_deal(payload: DealCreate):
     return service.create_deal(payload)
 
+@router.get('')
+def get_deals(lat: float, lng: float):
+    return service.find_nearby(lat, lng)
+
 @router.get('/nearby')
-def get_nearby_deals(lat: float, lon: float):
-    return service.find_nearby(lat, lon)
+def get_nearby_deals(lat: float, lng: float):
+    return service.find_nearby(lat, lng)

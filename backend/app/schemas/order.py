@@ -1,12 +1,19 @@
 from pydantic import BaseModel
 from typing import List
 
+
 class OrderItem(BaseModel):
-    name: str
+    itemId: str
     quantity: int
-    price: float | None = None
+
+
+class Location(BaseModel):
+    lat: float
+    lng: float
+
 
 class OrderCreate(BaseModel):
     vendorId: str
     items: List[OrderItem]
-    customerPhone: str
+    location: Location | None = None
+    customerPhone: str | None = None
