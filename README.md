@@ -50,3 +50,24 @@ npm run dev
 ## Notes
 - Menu OCR is stubbed; menu upload inserts a placeholder item.
 - Vendor notifications use an iMessage stub logger (no Twilio).
+
+## Commands to run Docker
+- docker commpose up --build -d
+
+## Commands to run the backend
+- cd backend
+- docker build -t infrastreet-backend .
+- docker run -d --name infrastreet-backend -p 8000:8000 --env-file .env --network host infrastreet-backend
+
+## command to run the frontend 
+- npm install
+- npm run dev
+
+## Command to run the MCP server
+- docker build -t infrastreet-mcp .
+- docker run -d --name infrastreet-mcp -p 3001:3001 --network host infrastreet-mcp
+
+## Command if port 6379 is taken
+- sudo lsof -i :6379
+- sudo kill -9 <PID>
+- docker compose up --build -d
