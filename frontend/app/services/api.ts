@@ -123,3 +123,20 @@ export async function getDealsNearby(lat: number, lng: number): Promise<Deal[]> 
     return [];
   }
 }
+
+export async function placeDealOrder(
+  dealId: string,
+  data: { customerPhone: string; quantity: number; customerId?: string }
+): Promise<Order> {
+  const res = await api.post(`/deals/${dealId}/order`, data);
+  return res.data;
+}
+
+export async function getVendorStats(vendorId: string, days = 7) {
+  try {
+    const res = await api.get(`/vendors/${vendorId}/stats`, { params: { days } });
+    return res.data;
+  } catch {
+    return null;
+  }
+}

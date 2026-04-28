@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Optional
 
 class VoiceRequest(BaseModel):
     transcript: str
@@ -8,5 +9,5 @@ class VoiceRequest(BaseModel):
 class VoiceResponse(BaseModel):
     intent: str
     message: str
-    results: list | None = None
-    deals: list | None = None
+    results: Optional[list] = None
+    deals: Optional[list] = None

@@ -27,6 +27,7 @@ export interface Vendor {
   location?: Location;
   menu?: MenuItem[];
   matchingItems?: { name: string; price: number }[];
+  reliabilityScore?: number;
 }
 
 export interface Deal {
@@ -36,8 +37,14 @@ export interface Deal {
   itemName: string;
   dealPrice: number;
   originalPrice?: number;
+  discountPct?: number;
+  remainingQuantity?: number;
   expiresAt: string;
   distance_m?: number;
+  distanceMiles?: number;
+  mediaUrl?: string;
+  reliabilityScore?: number;
+  rankScore?: number;
 }
 
 export interface Order {
@@ -45,10 +52,12 @@ export interface Order {
   vendorId: string;
   vendorName?: string;
   customerPhone?: string;
+  dealId?: string;
   status: string;
   items: { name: string; quantity: number; price?: number }[];
   total?: number;
   pickupCode?: string;
+  checkoutUrl?: string;
   createdAt?: string;
 }
 

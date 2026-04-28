@@ -2,7 +2,7 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-DATABASE_URL = 'postgresql://postgres:hackathon2026@db.xjyguwzcymewmdzjdari.supabase.co:5432/postgres'
+DATABASE_URL = 'postgresql://postgres:9003TlaixcoChimalhuacan#$@db.juvsknjqhnpguqsqdfwu.supabase.co:5432/postgres'
 
 # Handle Supabase connection pooling (use transaction mode)
 if "supabase.co" in DATABASE_URL:

@@ -2,9 +2,11 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from pydantic import BaseModel
 from app.schemas.vendor import VendorCreate
 from app.services.vendor_service import VendorService
+from app.services.deal_service import DealService
 
 router = APIRouter()
 service = VendorService()
+deal_svc = DealService()
 
 
 class AddItemRequest(BaseModel):
@@ -29,6 +31,11 @@ def get_vendor(vendor_id: str):
     if not v:
         raise HTTPException(404, "Not found")
     return v
+
+
+@router.get("/{vendor_id}/stats")
+def get_vendor_stats(vendor_id: str, days: int = Query(7)):
+    return deal_svc.get_vendor_stats(vendor_id, days)
 
 
 @router.post("/{vendor_id}/menu")

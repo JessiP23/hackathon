@@ -1,8 +1,14 @@
 import uuid
 from app.db import SessionLocal
 from sqlalchemy import text
-from app.services.ocr_service import ocr
+from app.services.ocr_service import OCRService
+_ocr = None
 
+def get_ocr() -> OCRService:
+    global _ocr
+    if _ocr is None:
+        _ocr = OCRService()
+    return _ocr
 
 class VendorService:
     def create_vendor(self, payload):
@@ -75,7 +81,7 @@ class VendorService:
         db = SessionLocal()
         try:
             content = await file.read()
-            items = ocr.extract_items(content)
+            items = get_ocr().extract_items(content)
 
             inserted = []
             for item in items:

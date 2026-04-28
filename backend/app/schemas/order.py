@@ -3,9 +3,9 @@ from typing import List, Optional
 
 class OrderItem(BaseModel):
     itemId: str
-    name: str | None = None
+    name: Optional[str] = None
     quantity: int
-    price: float | None = None
+    price: Optional[float] = None
 
 class OrderItemCreate(BaseModel):
     itemId: str
@@ -19,7 +19,7 @@ class OrderCreate(BaseModel):
 class OrderResponse(BaseModel):
     orderId: str
     status: str
-    total: float | None = None
+    total: Optional[float] = None
 
 class OrderStatusUpdate(BaseModel):
     status: str
