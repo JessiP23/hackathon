@@ -14,3 +14,6 @@ boto3>=1.34.0
 python-dotenv>=1.0.0
 pytz>=2024.1
 twilio>=9.0.0
+
+# Optional v3.3 menu OCR: pip install paddlepaddle paddleocr (platform wheels from Paddle docs).
+# USE_PADDLE_OCR=1 by default; Groq vision used when Paddle is unavailable.

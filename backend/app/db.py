@@ -1,55 +1,39 @@
 import os
+from urllib.parse import quote_plus, urlparse
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-
-def _sqlalchemy_database_url(raw: str) -> str:
-    """Plain postgresql:// selects psycopg2 (not installed). We use psycopg v3 only."""
+def get_database_url() -> str:
+    raw = os.getenv("DATABASE_URL", "").strip().strip('"').strip("'")
     if not raw:
-        return raw
-    url = raw.strip().strip('"').strip("'")
-    if not url:
-        return url
-    proto = url.split("://", 1)[0].lower()
-    if proto in ("http", "https"):
-        raise RuntimeError(
-            "DATABASE_URL must be a Postgres URI (postgresql:// or postgres://), not an https:// URL. "
-            "Use the connection string from Fly Postgres (`fly postgres connect` / dashboard), Neon, "
-            "Supabase (Database settings → URI), or Docker Compose — not a REST or dashboard link."
-        )
-    scheme = url.split("://", 1)[0]
-    if "+" in scheme:
-        return url
-    if url.startswith("postgresql://"):
-        return "postgresql+psycopg://" + url[len("postgresql://") :]
-    if url.startswith("postgres://"):
-        return "postgresql+psycopg://" + url[len("postgres://") :]
-    raise RuntimeError(
-        f"DATABASE_URL must start with postgresql:// or postgres:// (got scheme {proto!r})."
-    )
+        raise RuntimeError("DATABASE_URL not set")
 
+    if raw.startswith("postgres://"):
+        raw = raw.replace("postgres://", "postgresql://", 1)
 
-DATABASE_URL = _sqlalchemy_database_url(
-    os.getenv(
-        "DATABASE_URL",
-        "postgresql://infrastreet:infrastreet@localhost:5432/infrastreet",
-    )
+    if not raw.startswith("postgresql://"):
+        raise RuntimeError(f"DATABASE_URL must start with postgresql://, got: {raw[:20]}...")
+
+    # Force psycopg3 driver
+    if "+" not in raw.split("://", 1)[0]:
+        raw = raw.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    return raw
+
+DATABASE_URL = get_database_url()
+
+# For Supabase transaction pooler, disable prepared statements
+connect_args = {}
+if "pooler.supabase.com" in DATABASE_URL:
+    connect_args["options"] = "-c search_path=public"
+    connect_args["prepare_threshold"] = 0 # This fixes pgbouncer transaction mode
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10,
+    connect_args=connect_args,
 )
 
-# Handle Supabase connection pooling (use transaction mode)
-if "supabase.co" in DATABASE_URL:
-    # Supabase uses port 6543 for transaction pooling
-    # But direct connection on 5432 works fine for our use case
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=10,
-        connect_args={
-            "options": "-c search_path=public"
-        }
-    )
-else:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-
-SessionLocal = sessionmaker(bind=engine)
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)

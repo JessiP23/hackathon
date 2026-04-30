@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import vendors, orders, deals, voice, user
+from app.routers.customers import router as customers_router
 from app.routers.webhook import router as webhook_router
 from app.routers.stripe_webhook import router as stripe_router
 from app.routers.telegram_webhook import router as telegram_router
@@ -19,6 +20,7 @@ app.add_middleware(
 )
 
 app.include_router(user.router, prefix="/users", tags=["users"])
+app.include_router(customers_router, prefix="/customers", tags=["customers"])
 app.include_router(vendors.router, prefix="/vendors", tags=["vendors"])
 app.include_router(orders.router, prefix="/orders", tags=["orders"])
 app.include_router(deals.router, prefix="/deals", tags=["deals"])

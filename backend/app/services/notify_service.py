@@ -1,4 +1,4 @@
-"""Twilio + Telegram notifications for vendors and customers (v3.2)."""
+"""Twilio + Telegram notifications for vendors and customers (v3.3)."""
 import os
 import asyncio
 from app.db import SessionLocal
@@ -95,10 +95,10 @@ class NotifyService:
                       AND ST_DWithin(c.location::geography,
                                     ST_MakePoint(:lng, :lat)::geography,
                                     :radius_meters)
-                      AND (SELECT COUNT(*) FROM notification_logs nl
+                      AND (SELECT COUNT(*) FROM notifications nl
                            WHERE nl.customer_id = c.id
                              AND nl.sent_at > NOW() - INTERVAL '1 day') < :max_day
-                      AND (SELECT COUNT(*) FROM notification_logs nl2
+                      AND (SELECT COUNT(*) FROM notifications nl2
                            WHERE nl2.customer_id = c.id
                              AND nl2.vendor_id = :vendor_id
                              AND nl2.sent_at > NOW() - INTERVAL '30 minutes') = 0
@@ -125,10 +125,13 @@ class NotifyService:
             tg_id = getattr(c, "telegram_id", None)
 
             log_ch = "sms"
-            if ch == "telegram" and tg_id:
-                r = await self._send_telegram_customer(int(tg_id), msg)
-                log_ch = "telegram" if r.get("sent") else "sms"
-                if not r.get("sent"):
+            if ch == "telegram":
+                if tg_id:
+                    r = await self._send_telegram_customer(int(tg_id), msg)
+                    log_ch = "telegram" if r.get("sent") else "sms"
+                    if not r.get("sent"):
+                        await self._send_twilio(c.phone, msg, TWILIO_CUSTOMER_SID)
+                else:
                     await self._send_twilio(c.phone, msg, TWILIO_CUSTOMER_SID)
             elif ch == "both" and tg_id:
                 await self._send_telegram_customer(int(tg_id), msg)
@@ -187,7 +190,9 @@ class NotifyService:
         short_code = deal.get("short_code") or deal["deal_id"]
         short_url = f"{_short_link_base()}/d/{short_code}"
         disc = f"{int(pct)}% off" if pct else f"${price}"
-        walk = f"{dist}min walk" if dist < 30 else f"{dist}mi"
+        dist_mi = float(dist)
+        walk_mins = max(1, int(dist_mi * 18 + 0.5))
+        walk = f"{walk_mins}min walk"
         return (
             f"InfraStreet: {item} {disc} @ {vendor}, {walk}. ${price}. {qty} left til {end_t}. {short_url}"
         )[:480]
@@ -197,7 +202,7 @@ class NotifyService:
         try:
             db.execute(
                 text("""
-                    INSERT INTO notification_logs (customer_id, deal_id, vendor_id, channel, sent_at)
+                    INSERT INTO notifications (customer_id, deal_id, vendor_id, channel, sent_at)
                     VALUES (:cid, :did, :vid, :ch, NOW())
                     ON CONFLICT DO NOTHING
                 """),

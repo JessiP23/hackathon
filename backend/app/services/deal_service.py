@@ -115,11 +115,20 @@ class DealService:
             deal_id = row[0]
             db.commit()
 
+            vendor_name = data.get("vendor_name") or ""
+            if not vendor_name:
+                nrow = db.execute(
+                    text("SELECT name FROM vendors WHERE id = :vid LIMIT 1"),
+                    {"vid": vendor_id},
+                ).fetchone()
+                if nrow:
+                    vendor_name = nrow[0] or ""
+
             # Fan out notifications asynchronously
             if status == "active":
                 deal_info = {
                     "deal_id": deal_id, "vendor_id": vendor_id,
-                    "vendor_name": data.get("vendor_name", ""),
+                    "vendor_name": vendor_name,
                     "item_name": item_name, "deal_price": deal_price,
                     "original_price": original_price, "discount_pct": discount_pct,
                     "quantity": quantity, "end_time": end_time,

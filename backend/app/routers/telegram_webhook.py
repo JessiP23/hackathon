@@ -1,4 +1,4 @@
-"""Telegram Bot webhook — vendors DM the bot (InfraStreet AI Agent v3.1)."""
+"""Telegram Bot webhook — vendors DM the bot (InfraStreet AI Agent v3.2)."""
 from __future__ import annotations
 
 import os
@@ -50,6 +50,21 @@ async def telegram_webhook(request: Request):
 
         await telegram_client.answer_callback_query(cq_id)
 
+        if data.startswith("cancel_"):
+            deal_id = data[len("cancel_") :]
+            vendor = agent_service._get_vendor_by_phone(phone)
+            if vendor:
+                from app.services.deal_service import DealService
+
+                DealService().cancel_deal(deal_id, vendor["id"])
+                await telegram_client.send_message(
+                    chat_id,
+                    "Listo. Deal cancelado; reembolsos en proceso si habia ordenes pagadas.",
+                )
+            else:
+                await telegram_client.send_message(chat_id, "No encontramos tu tienda registrada.")
+            return {"ok": True}
+
         if data == "deal_yes":
             body = "SI"
         elif data == "deal_no":
@@ -90,6 +105,8 @@ async def telegram_webhook(request: Request):
 
     image_bytes: bytes | None = None
     if msg.get("photo"):
+        if agent_service._get_vendor_by_phone(phone):
+            await telegram_client.send_message(chat_id, "Leyendo tu menu... 📸")
         photos = msg["photo"]
         best = max(photos, key=lambda p: p.get("width", 0) * p.get("height", 0))
         fid = best.get("file_id")

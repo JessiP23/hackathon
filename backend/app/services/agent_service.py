@@ -296,10 +296,8 @@ class AgentService:
         fallback_url = media_url or "telegram:image"
         stored_url = self._upload_menu_image(vendor_id, image_bytes, fallback_url)
         from app.services.ocr_service import OCRService
-        try:
-            ocr = OCRService()
-        except RuntimeError:
-            return "No pude leer la foto. Escribe tus articulos uno por linea: Tacos $25" if lang == "es" else "I could not read the photo. Text items one per line: Tacos $25"
+
+        ocr = OCRService()
         items = ocr.extract_items(image_bytes)
 
         if len(items) < 2:
