@@ -7,17 +7,20 @@ import { User } from "./shared/types";
 
 export default function LandingPage() {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const phone = localStorage.getItem("infrastreet_phone");
-    if (phone) {
-      getUserByPhone(phone)
-        .then(setUser)
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
+    async function loadUser() {
+      const phone = localStorage.getItem("infrastreet_phone");
+      if (!phone) return;
+      setLoading(true);
+      try {
+        setUser(await getUserByPhone(phone));
+      } finally {
+        setLoading(false);
+      }
     }
+    void loadUser();
   }, []);
 
   if (loading) {
@@ -108,7 +111,7 @@ export default function LandingPage() {
             Find Food
           </Link>
           <Link href="/vendor-onboarding" className="block w-full border-2 border-white/20 text-white py-4 rounded-2xl text-center font-semibold hover:bg-white/5 transition-colors">
-            I'm a Vendor
+            I&apos;m a Vendor
           </Link>
         </div>
       </div>

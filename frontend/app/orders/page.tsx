@@ -8,21 +8,22 @@ import { Order, Vendor } from "@/app/shared/types";
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [recommendations, setRecommendations] = useState<Vendor[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const phone = localStorage.getItem("infrastreet_phone");
-    if (!phone) {
-      setLoading(false);
-      return;
-    }
-
-    Promise.all([getCustomerOrders(phone), getRecommendations(phone)])
-      .then(([o, r]) => {
+    async function loadOrders() {
+      const phone = localStorage.getItem("infrastreet_phone");
+      if (!phone) return;
+      setLoading(true);
+      try {
+        const [o, r] = await Promise.all([getCustomerOrders(phone), getRecommendations(phone)]);
         setOrders(o);
         setRecommendations(r);
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        setLoading(false);
+      }
+    }
+    void loadOrders();
   }, []);
 
   function formatDate(d: string) {

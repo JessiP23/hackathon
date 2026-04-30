@@ -14,9 +14,6 @@ export default function MapView({ vendors = [], deals = [], userLocation, highli
     ...vendors.filter(v => v.location).map(v => v.location!),
   ];
 
-  const centerLat = allLocs.length ? allLocs.reduce((s, l) => s + l.lat, 0) / allLocs.length : 40.7128;
-  const centerLng = allLocs.length ? allLocs.reduce((s, l) => s + l.lng, 0) / allLocs.length : -74.006;
-
   return (
     <div className="h-48 bg-neutral-900 relative overflow-hidden">
       {/* Grid lines */}
@@ -50,7 +47,7 @@ export default function MapView({ vendors = [], deals = [], userLocation, highli
         
         // Simple positioning based on index
         const angle = (i / vendors.length) * Math.PI * 2;
-        const radius = 30 + Math.random() * 15;
+        const radius = 30 + ((i * 7) % 15);
         const x = 50 + Math.cos(angle) * radius;
         const y = 50 + Math.sin(angle) * radius;
 
@@ -80,7 +77,7 @@ export default function MapView({ vendors = [], deals = [], userLocation, highli
 
       {/* Center info */}
       <div className="absolute bottom-2 left-2 text-xs text-neutral-500">
-        {vendors.length} vendors nearby
+        {vendors.length} vendors nearby{deals.length ? ` · ${deals.length} deals` : ""}
       </div>
     </div>
   );

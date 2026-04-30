@@ -1,73 +1,56 @@
 # InfraStreet
 
-Voice-first, agentic marketplace for street vendors.
+AI-native street vendor marketplace. Vendors onboard and manage flash deals over Twilio SMS/MMS/WhatsApp; customers discover and reserve nearby deals in the mobile web app.
 
-## What’s wired
-- FastAPI backend with Postgres/PostGIS geo queries
-- LeanMCP tools for voice search and deals
-- Next.js frontend (map + voice stub)
-- Vendor onboarding + menu upload stub
-- Order notifications via iMessage stub logger
+## What Is Wired
+- FastAPI backend with Postgres/PostGIS, Redis state, Twilio webhooks, Groq deal parsing/OCR hooks, Stripe Checkout, and APScheduler jobs.
+- LeanMCP server exposing vendor search, nearby deals, onboarding, and order tools.
+- Next.js frontend for customer deal discovery, voice search, vendor onboarding, orders, and vendor dashboard.
 
-## Environment setup
-Create env files from the examples:
-- `backend/.env.example` → `backend/.env`
-- `frontend/.env.local.example` → `frontend/.env.local`
+## Environment Setup
+Create local env files:
 
-## Run locally
-1) Start infra services + MCP + backend using Docker Compose.
-2) Run the Next.js frontend locally.
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.local.example frontend/.env.local
+cp mcp-server/.env.example mcp-server/.env
+```
 
-### Backend + infra (Docker)
-From the repo root:
+For a local smoke test, the defaults are enough except live Twilio/Groq/Stripe/B2 calls will be skipped or unavailable until you add real credentials.
+
+## Run Everything Locally
+Start Postgres/PostGIS, Redis, MCP, and backend from the repo root:
+
 ```bash
 docker compose up --build
 ```
 
-### Frontend
-From `frontend/`:
+Run the frontend in a second terminal:
+
 ```bash
+cd frontend
 npm install
 npm run dev
 ```
 
-## End-to-end flow (happy path)
-1) Open the app at `http://localhost:3000`.
-2) Click the mic button and say “tacos” (stub prompt).
-3) Vendors show up on the map list.
-4) Onboard a vendor at `/vendor-onboarding` and upload a menu image.
-5) Open `/vendor/{id}` to place an order.
+Open `http://localhost:3000`. Backend health is `http://localhost:8000/health`; MCP runs at `http://localhost:3001/mcp`.
 
-## API endpoints
-- `POST /vendors` — create vendor
-- `GET /vendors/{vendorId}` — vendor + menu
-- `POST /vendors/{vendorId}/menu` — upload menu image
-- `GET /vendors/nearby` — search nearby vendors
-- `GET /deals` — nearby flash deals
-- `POST /orders` — place order
-- `POST /voice` — voice transcript to MCP tools
+## Twilio Local Test
+1. Run `ngrok http 8000`.
+2. Set `PUBLIC_BASE_URL` in `backend/.env` to the ngrok HTTPS URL.
+3. In Twilio Messaging Services, set vendor inbound webhook to `https://<ngrok-id>.ngrok-free.app/sms/vendor`.
+4. Text your Twilio number to start vendor onboarding.
 
-## Notes
-- Menu OCR is stubbed; menu upload inserts a placeholder item.
-- Vendor notifications use an iMessage stub logger (no Twilio).
+## Useful Checks
+```bash
+cd backend && python -m compileall main.py app
+cd mcp-server && npm run build
+cd frontend && npm run lint && npm run build
+```
 
-## Commands to run Docker
-- docker commpose up --build -d
-
-## Commands to run the backend
-- cd backend
-- docker build -t infrastreet-backend .
-- docker run -d --name infrastreet-backend -p 8000:8000 --env-file .env --network host infrastreet-backend
-
-## command to run the frontend 
-- npm install
-- npm run dev
-
-## Command to run the MCP server
-- docker build -t infrastreet-mcp .
-- docker run -d --name infrastreet-mcp -p 3001:3001 --network host infrastreet-mcp
-
-## Command if port 6379 is taken
-- sudo lsof -i :6379
-- sudo kill -9 <PID>
-- docker compose up --build -d
+## Core Endpoints
+- `POST /sms/vendor` and `POST /sms/customer` - Twilio inbound webhooks.
+- `POST /vendors`, `GET /vendors/{vendorId}`, `POST /vendors/{vendorId}/menu`.
+- `GET /deals`, `POST /deals/{dealId}/order`.
+- `POST /orders`, `GET /orders/{orderId}`, `PATCH /orders/{orderId}/status`.
+- `POST /voice` - voice transcript routed through MCP tools with backend fallback.

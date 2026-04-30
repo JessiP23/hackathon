@@ -1,27 +1,31 @@
-"""
-Notification service — sends WhatsApp/SMS to nearby customers when a flash deal activates.
-Uses PostGIS ST_DWithin and Textbelt for SMS. WhatsApp via Meta Cloud API.
-"""
+"""Twilio notification service for vendor and customer SMS/WhatsApp."""
 import os
 import asyncio
-import httpx
 from app.db import SessionLocal
 from sqlalchemy import text
+from twilio.rest import Client
 
-TEXTBELT_KEY = os.getenv("TEXTBELT_KEY", "textbelt")
-WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN", "")
-WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID", "")
-BACKEND_URL = os.getenv("BACKEND_PUBLIC_URL", "https://infrastreet.app")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://infrastreet.app")
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_VENDOR_SID = os.getenv("TWILIO_MESSAGING_SERVICE_SID_VENDOR", "")
+TWILIO_CUSTOMER_SID = os.getenv("TWILIO_MESSAGING_SERVICE_SID_CUSTOMER", "")
 
 MAX_PER_DEAL = 500
 MAX_PER_DAY_PER_CUSTOMER = 3
 
 
 class NotifyService:
-    async def send_message(self, phone: str, message: str, channel: str = "sms") -> dict:
-        if channel == "whatsapp" and WHATSAPP_TOKEN:
-            return await self._send_whatsapp(phone, message)
-        return await self._send_sms(phone, message)
+    def __init__(self):
+        self._client = (
+            Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+            if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN
+            else None
+        )
+
+    async def send_message(self, phone: str, message: str, channel: str = "customer") -> dict:
+        service_sid = TWILIO_VENDOR_SID if channel == "vendor" else TWILIO_CUSTOMER_SID
+        return await self._send_twilio(phone, message, service_sid)
 
     async def fan_out_deal(self, deal: dict):
         """Fan-out deal notification to nearby eligible customers."""
@@ -62,11 +66,10 @@ class NotifyService:
 
         sent = 0
         for c in customers:
-            channel = getattr(c, "notification_channel", "sms") or "sms"
             dist = float(getattr(c, "dist_miles", 0))
-            msg = self._compose_deal_message(deal, dist, channel)
-            await self.send_message(c.phone, msg, channel)
-            self._log_notification(c.id, deal_id, vendor_id, channel)
+            msg = self._compose_deal_message(deal, dist)
+            await self.send_message(c.phone, msg, "customer")
+            self._log_notification(c.id, deal_id, vendor_id, "sms")
             sent += 1
             if sent % 30 == 0:
                 await asyncio.sleep(1.0)
@@ -75,82 +78,48 @@ class NotifyService:
         return {"sent": sent}
 
     def notify_vendor_order(self, vendor_phone: str, message: str):
-        print(f"[📱 Vendor] {vendor_phone}: {message}")
+        print(f"[Vendor SMS] {vendor_phone}: {message}")
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.create_task(self.send_message(vendor_phone, message, "sms"))
+            asyncio.create_task(self.send_message(vendor_phone, message, "vendor"))
         return {"sent": True, "phone": vendor_phone}
 
     def notify_customer_confirmation(self, customer_phone: str, message: str):
-        print(f"[📱 Customer] {customer_phone}: {message}")
+        print(f"[Customer SMS] {customer_phone}: {message}")
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.create_task(self.send_message(customer_phone, message, "sms"))
+            asyncio.create_task(self.send_message(customer_phone, message, "customer"))
         return {"sent": True, "phone": customer_phone}
 
-    async def _send_sms(self, phone: str, message: str, retry: int = 0) -> dict:
+    async def _send_twilio(self, phone: str, message: str, service_sid: str, retry: int = 0) -> dict:
+        if not self._client or not service_sid:
+            print(f"[Twilio disabled] {phone}: {message}")
+            return {"sent": False, "skipped": True, "error": "Twilio not configured"}
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    "https://textbelt.com/text",
-                    data={"phone": phone, "message": message[:160], "key": TEXTBELT_KEY},
-                )
-                data = resp.json()
-                if data.get("success"):
-                    return {"sent": True, "message_id": data.get("textId", "")}
-                if retry < 2:
-                    await asyncio.sleep(5 * (2 ** retry))
-                    return await self._send_sms(phone, message, retry + 1)
-                return {"sent": False, "error": str(data)}
+            msg = await asyncio.to_thread(
+                self._client.messages.create,
+                body=message[:1000],
+                messaging_service_sid=service_sid,
+                to=phone,
+            )
+            return {"sent": True, "message_id": msg.sid}
         except Exception as e:
             if retry < 2:
-                await asyncio.sleep(5 * (2 ** retry))
-                return await self._send_sms(phone, message, retry + 1)
+                await asyncio.sleep([5, 15, 45][retry])
+                return await self._send_twilio(phone, message, service_sid, retry + 1)
             return {"sent": False, "error": str(e)}
 
-    async def _send_whatsapp(self, phone: str, message: str, retry: int = 0) -> dict:
-        if not WHATSAPP_TOKEN or not WHATSAPP_PHONE_ID:
-            return await self._send_sms(phone, message)
-        try:
-            url = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_ID}/messages"
-            headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
-            payload = {"messaging_product": "whatsapp", "to": phone,
-                       "type": "text", "text": {"body": message[:1000]}}
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                if resp.status_code == 200:
-                    return {"sent": True, "message_id": resp.json().get("messages", [{}])[0].get("id", "")}
-                if retry < 2:
-                    await asyncio.sleep(5 * (2 ** retry))
-                    return await self._send_whatsapp(phone, message, retry + 1)
-                return await self._send_sms(phone, message)
-        except Exception as e:
-            if retry < 2:
-                await asyncio.sleep(5 * (2 ** retry))
-                return await self._send_whatsapp(phone, message, retry + 1)
-            return await self._send_sms(phone, message)
-
-    def _compose_deal_message(self, deal: dict, dist: float, channel: str) -> str:
+    def _compose_deal_message(self, deal: dict, dist: float) -> str:
         item = deal.get("item_name", "")
         price = deal.get("deal_price") or deal.get("price", "")
-        orig = deal.get("original_price")
         pct = deal.get("discount_pct")
         vendor = deal.get("vendor_name", "")
         end_t = deal.get("end_time", "")
         qty = deal.get("quantity", "?")
         deal_id = deal["deal_id"]
-        short_url = f"{BACKEND_URL}/d/{deal_id}"
-
-        if channel == "sms":
-            disc = f"{int(pct)}%" if pct else f"${price}"
-            return f"🔥 {item} {disc} off @ {vendor}, {dist}mi. ${price}. {qty} left til {end_t}. {short_url}"[:160]
-
-        savings = f"\n💰 Solo ${price} (antes ${orig})" if orig else (f"\n💰 {int(pct)}% de descuento" if pct else "")
-        return (
-            f"🔥 Deal cerca de ti!\n{item} — {f'{int(pct)}% off' if pct else f'${price}'}\n"
-            f"📍 {vendor} · {dist} millas\n⏰ Hasta las {end_t} · {qty} disponibles"
-            f"{savings}\n👉 {short_url}"
-        )[:1000]
+        short_url = f"{FRONTEND_URL}/d/{deal_id}"
+        disc = f"{int(pct)}% off" if pct else f"${price}"
+        return f"InfraStreet: {item} {disc} @ {vendor}, {dist}mi. ${price}. {qty} left til {end_t}. {short_url}"[:160]
 
     def _log_notification(self, customer_id, deal_id, vendor_id, channel):
         db = SessionLocal()

@@ -1,92 +1,67 @@
-"""
-Inbound WhatsApp/SMS webhook router.
-Receives messages from the Meta Cloud API (WhatsApp) or Textbelt/Twilio (SMS)
-and routes them to the InfraStreet agent.
-"""
+"""Inbound Twilio SMS/MMS/WhatsApp webhook router."""
+import os
+
 from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import Response
+from twilio.request_validator import RequestValidator
+from twilio.twiml.messaging_response import MessagingResponse
+
 from app.services.agent_service import agent_service
 
 router = APIRouter()
 
 
-# ── WhatsApp Cloud API webhook ─────────────────────────────────────────
-@router.get("/webhook/whatsapp")
-async def whatsapp_verify(request: Request):
-    """Meta webhook verification challenge."""
-    import os
-    params = dict(request.query_params)
-    if params.get("hub.verify_token") == os.getenv("WHATSAPP_VERIFY_TOKEN", "infrastreet"):
-        return int(params.get("hub.challenge", "0"))
-    raise HTTPException(403, "Forbidden")
+def _twiml(message: str) -> Response:
+    response = MessagingResponse()
+    response.message(message)
+    return Response(content=str(response), media_type="application/xml")
 
 
-@router.post("/webhook/whatsapp")
-async def whatsapp_inbound(request: Request):
-    """Receive WhatsApp messages from Meta Cloud API."""
-    try:
-        body = await request.json()
-        entry = body.get("entry", [{}])[0]
-        changes = entry.get("changes", [{}])[0]
-        value = changes.get("value", {})
-        messages = value.get("messages", [])
+async def _twilio_form(request: Request) -> dict:
+    form = await request.form()
+    data = {str(k): str(v) for k, v in form.items()}
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN", "")
+    signature = request.headers.get("X-Twilio-Signature", "")
 
-        for msg in messages:
-            phone = msg.get("from", "")
-            msg_type = msg.get("type", "text")
-            text_body = ""
-            media_url = None
+    if not auth_token:
+        raise HTTPException(500, "Twilio auth token is not configured")
 
-            if msg_type == "text":
-                text_body = msg.get("text", {}).get("body", "")
-            elif msg_type in ("image", "video"):
-                media = msg.get(msg_type, {})
-                media_id = media.get("id")
-                if media_id:
-                    media_url = await _resolve_whatsapp_media(media_id)
-                text_body = media.get("caption", "")
-            elif msg_type == "audio":
-                # Ignore audio for now
-                continue
-
-            if phone:
-                reply = await agent_service.handle_vendor_message(phone, text_body, media_url)
-                from app.services.notify_service import notify_service
-                await notify_service.send_message(phone, reply, "whatsapp")
-
-    except Exception as e:
-        print(f"[Webhook/WhatsApp] Error: {e}")
-    return {"status": "ok"}
+    public_url = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+    url = f"{public_url}{request.url.path}" if public_url else str(request.url)
+    if not RequestValidator(auth_token).validate(url, data, signature):
+        raise HTTPException(403, "Invalid Twilio signature")
+    return data
 
 
-async def _resolve_whatsapp_media(media_id: str) -> str:
-    import os, httpx
-    token = os.getenv("WHATSAPP_TOKEN", "")
-    if not token:
-        return ''
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(
-                f"https://graph.facebook.com/v19.0/{media_id}",
-                headers={"Authorization": f"Bearer {token}"}
-            )
-            url = r.json().get("url")
-            return url
-    except Exception:
-        return ''
+@router.post("/sms/vendor")
+async def vendor_sms_inbound(request: Request):
+    """Receive vendor SMS/MMS/WhatsApp from Twilio and return TwiML."""
+    form = await _twilio_form(request)
+    phone = form.get("From", "")
+    text_body = form.get("Body", "")
+    media_url = form.get("MediaUrl0") if int(form.get("NumMedia", "0") or 0) > 0 else None
+
+    if not phone:
+        return _twiml("Missing sender.")
+
+    reply = await agent_service.handle_vendor_message(phone, text_body, media_url)
+    return _twiml(reply)
 
 
-# ── SMS webhook (Textbelt / generic) ──────────────────────────────────
-@router.post("/webhook/sms")
-async def sms_inbound(request: Request):
-    """Receive inbound SMS. Compatible with Textbelt reply webhook format."""
-    try:
-        form = await request.form()
-        phone = str(form.get("fromNumber") or form.get("From") or "")
-        text_body = str(form.get("text") or form.get("Body") or "")
-        if phone and text_body:
-            reply = await agent_service.handle_vendor_message(phone, text_body)
-            from app.services.notify_service import notify_service
-            await notify_service.send_message(phone, reply, "sms")
-    except Exception as e:
-        print(f"[Webhook/SMS] Error: {e}")
-    return {"status": "ok"}
+@router.post("/sms/customer")
+async def customer_sms_inbound(request: Request):
+    """Handle customer STOP/START replies sent by Twilio webhooks."""
+    form = await _twilio_form(request)
+    phone = form.get("From", "")
+    body = form.get("Body", "").strip().lower()
+
+    if body == "stop":
+        from app.services.user_service import UserService
+        UserService().set_customer_notifications(phone, enabled=False)
+        return _twiml("InfraStreet alerts off. Text START to re-enable.")
+    if body == "start":
+        from app.services.user_service import UserService
+        UserService().set_customer_notifications(phone, enabled=True)
+        return _twiml("InfraStreet alerts on.")
+
+    return _twiml("Open infrastreet.app to see deals near you.")

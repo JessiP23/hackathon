@@ -1,6 +1,33 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
+
+type SpeechRecognitionCtor = new () => SpeechRecognition;
+
+interface SpeechRecognitionEventLike {
+  results: {
+    [key: number]: {
+      [key: number]: {
+        transcript: string;
+      };
+    };
+  };
+}
+
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+}
+
+interface SpeechWindow extends Window {
+  SpeechRecognition?: SpeechRecognitionCtor;
+  webkitSpeechRecognition?: SpeechRecognitionCtor;
+}
 
 interface Props {
   onTranscript: (transcript: string) => void;
@@ -8,12 +35,11 @@ interface Props {
 
 export default function VoiceDial({ onTranscript }: Props) {
   const [recording, setRecording] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
 
   async function handleClick() {
     // Fall back to prompt if Web Speech API not available
-    if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
+    const speechWindow = window as SpeechWindow;
+    if (!speechWindow.webkitSpeechRecognition && !speechWindow.SpeechRecognition) {
       const transcript = prompt("Say what you're looking for:");
       if (transcript) onTranscript(transcript);
       return;
@@ -29,13 +55,14 @@ export default function VoiceDial({ onTranscript }: Props) {
 
   function startRecording() {
     const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      (window as SpeechWindow).SpeechRecognition || (window as SpeechWindow).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = "en-US";
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
       onTranscript(transcript);
       setRecording(false);

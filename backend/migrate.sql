@@ -1,5 +1,13 @@
 -- InfraStreet — Full Schema Migration
 -- Run once against Supabase (PostGIS must be enabled)
+CREATE TABLE IF NOT EXISTS users (
+    id          TEXT PRIMARY KEY DEFAULT 'u_' || substr(md5(random()::text),1,8),
+    phone       TEXT UNIQUE NOT NULL,
+    role        TEXT DEFAULT 'customer' CHECK (role IN ('customer', 'vendor', 'admin')),
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+-- InfraStreet — Full Schema Migration
+-- Run once against Supabase (PostGIS must be enabled)
 
 -- Enable PostGIS
 CREATE EXTENSION IF NOT EXISTS postgis;
@@ -12,6 +20,9 @@ CREATE TABLE IF NOT EXISTS vendors (
     location        geography(POINT, 4326),
     business_hours  TEXT,
     timezone        TEXT DEFAULT 'UTC',
+    status          TEXT DEFAULT 'awaiting_menu',
+    slug            TEXT UNIQUE,
+    menu_image_url  TEXT,
     reliability_score NUMERIC(5,2) DEFAULT 100,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
@@ -60,6 +71,7 @@ CREATE TABLE IF NOT EXISTS customers (
     location                geography(POINT, 4326),
     notification_channel    TEXT DEFAULT 'sms',
     notifications_enabled   BOOLEAN DEFAULT true,
+    radius_miles            NUMERIC(6,2) DEFAULT 10,
     reliability_score       NUMERIC(5,2) DEFAULT 100,
     fulfilled_orders        INTEGER DEFAULT 0,
     created_at              TIMESTAMPTZ DEFAULT NOW()
@@ -77,7 +89,7 @@ CREATE TABLE IF NOT EXISTS orders (
     service_fee             NUMERIC(10,2),
     status                  TEXT NOT NULL DEFAULT 'pending_payment'
                                 CHECK (status IN (
-                                    'pending_payment','paid','payment_failed',
+                                    'pending_payment','paid','payment_failed','expired',
                                     'fulfilled','refunded','reserved_unpaid','no_show','pending'
                                 )),
     pickup_code             TEXT,
@@ -105,3 +117,13 @@ CREATE INDEX IF NOT EXISTS notif_sent_at_idx ON notification_logs (sent_at);
 -- ── users (auth) ──────────────────────────────────────────────────────
 -- existing table — add columns if needed
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'customer';
+
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'awaiting_menu';
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS slug TEXT UNIQUE;
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS menu_image_url TEXT;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS radius_miles NUMERIC(6,2) DEFAULT 10;
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check;
+ALTER TABLE orders ADD CONSTRAINT orders_status_check CHECK (status IN (
+    'pending_payment','paid','payment_failed','expired',
+    'fulfilled','refunded','reserved_unpaid','no_show','pending'
+));

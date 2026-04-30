@@ -80,7 +80,7 @@ export default function CustomerOnboardingPage() {
           </form>
 
           <p className="text-center text-xs text-neutral-600">
-            We'll notify you about your orders. No spam.
+            We&apos;ll notify you about your orders. No spam.
           </p>
         </div>
       </div>

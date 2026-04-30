@@ -57,25 +57,22 @@ class AgentService:
         self, phone: str, text_body: str, media_url: str | None = None
     ) -> str:
         vendor = self._get_vendor_by_phone(phone)
+        state = self._get_state(phone)
+        lang = self._get_lang(phone) or self._detect_lang(text_body)
+        self._set_lang(phone, lang)
 
-        # New vendor — start onboarding
+        # New vendor — continue or start SMS onboarding before a DB record exists.
         if not vendor:
+            if state and state.get("step") == "awaiting_name_location":
+                return await self._onboard_step2(phone, text_body, lang)
             return await self._onboard_step1(phone, text_body)
 
         vendor_id = vendor["id"]
-        lang = self._detect_lang(text_body)
-        self._set_lang(phone, lang)
 
         # Cancel active deal
         lower = text_body.strip().lower()
         if any(k in lower for k in CANCEL_KEYWORDS):
             return await self._cancel_active_deal(vendor_id, lang)
-
-        # Onboarding continuation: waiting for name+location
-        state = await self._get_state(phone)
-
-        if state and state.get("step") == "awaiting_name_location":
-            return await self._onboard_step2(phone, vendor_id, text_body, lang)
 
         if state and state.get("step") == "awaiting_menu_confirm":
             if any(k in lower for k in YES_KEYWORDS):
@@ -110,15 +107,18 @@ class AgentService:
     async def _onboard_step1(self, phone: str, text_body: str) -> str:
         lang = self._detect_lang(text_body)
         self._set_lang(phone, lang)
-        self._set_state(phone, {"step": "awaiting_name_location"})
+        self._set_state(phone, {"step": "awaiting_name_location"}, ttl=1800)
         if lang == "es":
-            return "¡Hola! Bienvenido a InfraStreet 🌮 ¿Cómo se llama tu negocio y en qué colonia o dirección estás?"
+            return "Hola! Bienvenido a InfraStreet. Como se llama tu negocio y en que colonia o calle estas?"
         return "Hey! Welcome to InfraStreet 🌮 What's your business name and where are you located?"
 
-    async def _onboard_step2(self, phone: str, vendor_id: str, text_body: str, lang: str) -> str:
+    async def _onboard_step2(self, phone: str, text_body: str, lang: str) -> str:
         # Parse name + location from free text using Groq
         name, location_str = await self._extract_name_location(text_body)
         coords = await self._geocode(location_str)
+        if coords["lat"] == 0.0 and coords["lng"] == 0.0:
+            return "No encontre esa ubicacion. Mandame una calle con cruce o zip code." if lang == "es" else "I could not find that location. Send a cross-street or zip code."
+
         db = SessionLocal()
         try:
             import uuid as _uuid
@@ -138,54 +138,59 @@ class AgentService:
         finally:
             db.close()
 
-        self._set_state(phone, {"step": "awaiting_menu_photo"})
+        self._set_state(phone, {"step": "awaiting_menu_photo"}, ttl=1800)
         if lang == "es":
-            return f"✅ Registrado: {name}\n📍 {location_str}\n\nAhora manda una foto de tu menú o lista de productos 📸"
-        return f"✅ Registered: {name}\n📍 {location_str}\n\nNow send a photo of your menu or product list 📸"
+            return "Perfecto! Ahora manda una foto de tu menu o tus productos como MMS."
+        return "Perfect! Now send a photo of your menu or products as a picture message."
 
     # ──────────────────────────────────────────────────────────────
     # Menu handling
     # ──────────────────────────────────────────────────────────────
     async def _handle_media(self, phone: str, vendor_id: str, media_url: str, lang: str) -> str:
-        state = self._get_state(phone) or {}
         # If deal is being created, attach media to pending deal
-        pending = await self._get_pending_deal(vendor_id)
+        pending = self._get_pending_deal(vendor_id)
         if pending:
             pending["media_url"] = media_url
             self._set_pending_deal(vendor_id, pending)
-            return "📸 Foto guardada. Ahora dime los detalles del deal." if lang == "es" else "📸 Photo saved. Now tell me the deal details."
+            return "Foto guardada. Ahora dime los detalles del deal." if lang == "es" else "Photo saved. Now tell me the deal details."
 
         # Otherwise treat as menu upload
-        ack = "📸 Procesando tu menú..." if lang == "es" else "📸 Got it, reading your menu..."
         # Fetch image and run OCR
         try:
             import httpx
             async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.get(media_url)
+                resp = await client.get(
+                    media_url,
+                    auth=(os.getenv("TWILIO_ACCOUNT_SID", ""), os.getenv("TWILIO_AUTH_TOKEN", "")),
+                )
                 image_bytes = resp.content
         except Exception as e:
             return f"No pude descargar la imagen: {e}" if lang == "es" else f"Could not download image: {e}"
 
+        stored_url = self._upload_menu_image(vendor_id, image_bytes, media_url)
         from app.services.ocr_service import OCRService
-        ocr = OCRService()
+        try:
+            ocr = OCRService()
+        except RuntimeError:
+            return "No pude leer la foto. Escribe tus articulos uno por linea: Tacos $25" if lang == "es" else "I could not read the photo. Text items one per line: Tacos $25"
         items = ocr.extract_items(image_bytes)
 
         if len(items) < 2:
             # Treat as product/deal media, not menu
-            self._cache_media(vendor_id, media_url)
+            self._cache_media(vendor_id, stored_url)
             if lang == "es":
-                return "📸 Foto guardada. ¿Es para un deal? Manda: FLASH [hora] [artículo] [precio]"
-            return "📸 Photo saved. Is this for a deal? Send: FLASH [time] [item] [price]"
+                return "No pude leer bien la foto. Escribe tus articulos asi: Tacos $25"
+            return "I could not read the photo. Text items like: Tacos $25"
 
         # Store OCR results pending confirmation
-        self._set_state(phone, {"step": "awaiting_menu_confirm", "items": items, "media_url": media_url})
+        self._set_state(phone, {"step": "awaiting_menu_confirm", "items": items, "media_url": stored_url}, ttl=1800)
         lines = "\n".join([f"• {i['name']} — ${i['price']}" if i.get('price') else f"• {i['name']}" for i in items])
         if lang == "es":
-            return f"Encontré estos artículos en tu menú:\n{lines}\n\n¿Está correcto? Responde SÍ para publicar o dime qué cambiar."
+            return f"Encontre estos articulos:\n{lines}\nCorrecto? Responde SI o dime que cambiar."
         return f"I found these items in your menu:\n{lines}\n\nIs this correct? Reply YES to save or tell me what to change."
 
     async def _confirm_menu(self, phone: str, vendor_id: str, lang: str) -> str:
-        state = await self._get_state(phone) or {}
+        state = self._get_state(phone) or {}
         items = state.get("items", [])
         db = SessionLocal()
         try:
@@ -201,6 +206,11 @@ class AgentService:
                     {"id": mid, "vid": vendor_id, "name": item["name"],
                      "desc": item.get("description", ""), "price": item.get("price") or 0}
                 )
+            if state.get("media_url"):
+                db.execute(
+                    text("UPDATE vendors SET menu_image_url = :url, status = 'active' WHERE id = :vid"),
+                    {"url": state["media_url"], "vid": vendor_id},
+                )
             db.commit()
         finally:
             db.close()
@@ -211,8 +221,8 @@ class AgentService:
 
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         if lang == "es":
-            return (f"✅ ¡Tu tienda está lista! {frontend_url}/vendor/{slug}\n\n"
-                    f"Para lanzar un deal: FLASH [hora] [artículo] [descuento o precio]\n"
+            return (f"Listo! Tu tienda esta en: {frontend_url}/vendor/{slug}\n"
+                    f"Para un deal: FLASH 5pm-7pm tacos 50% 20 porciones\n"
                     f"Ejemplo: FLASH 5pm-7pm tacos 50%")
         return (f"✅ Your store is live! {frontend_url}/vendor/{slug}\n\n"
                 f"To launch a deal: FLASH [time] [item] [discount or price]\n"
@@ -239,7 +249,7 @@ class AgentService:
         parsed = deal_parser.parse(text_body, tz)
 
         # Merge with any existing pending deal
-        pending = await self._get_pending_deal(vendor_id) or {}
+        pending = self._get_pending_deal(vendor_id) or {}
         pending.update({k: v for k, v in parsed.items() if v is not None})
         self._set_pending_deal(vendor_id, pending)
 
@@ -252,9 +262,9 @@ class AgentService:
 
     async def _handle_deal_clarification(self, phone: str, vendor_id: str, text_body: str, lang: str) -> str:
         from app.services.deal_parser_service import deal_parser
-        state = await self._get_state(phone) or {}
+        state = self._get_state(phone) or {}
         missing = state.get("missing", "")
-        pending = await self._get_pending_deal(vendor_id) or {}
+        pending = self._get_pending_deal(vendor_id) or {}
 
         # Apply the answer
         lower = text_body.strip().lower()
@@ -285,7 +295,7 @@ class AgentService:
         return await self._show_deal_confirmation(phone, vendor_id, lang)
 
     async def _show_deal_confirmation(self, phone: str, vendor_id: str, lang: str) -> str:
-        pending = await self._get_pending_deal(vendor_id) or {}
+        pending = self._get_pending_deal(vendor_id) or {}
         item = pending.get("item_name", "?")
         deal_price = pending.get("deal_price")
         orig_price = pending.get("original_price")
@@ -312,7 +322,7 @@ class AgentService:
                 f"Publish? Reply YES")
 
     async def _publish_deal(self, phone: str, vendor_id: str, lang: str) -> str:
-        pending = await self._get_pending_deal(vendor_id) or {}
+        pending = self._get_pending_deal(vendor_id) or {}
         from app.services.deal_service import DealService
         svc = DealService()
 
@@ -331,6 +341,7 @@ class AgentService:
             "end_time": pending.get("end_time"),
             "radius_miles": pending.get("radius_miles", 10),
             "media_url": pending.get("media_url"),
+            "vendor_name": vendor.get("name") if vendor else "",
             "lat": lat,
             "lng": lng,
         })
@@ -339,8 +350,8 @@ class AgentService:
         self._clear_pending_deal(vendor_id)
 
         if lang == "es":
-            return "✅ Deal publicado! Ya notificamos a clientes cercanos. 🔥"
-        return "✅ Deal published! Nearby customers have been notified. 🔥"
+            return "Deal publicado! Clientes cercanos ya fueron notificados."
+        return "Deal published! Nearby customers were notified."
 
     async def _cancel_active_deal(self, vendor_id: str, lang: str) -> str:
         from app.services.deal_service import DealService
@@ -411,10 +422,10 @@ class AgentService:
     # ──────────────────────────────────────────────────────────────
     # Helpers — Redis state
     # ──────────────────────────────────────────────────────────────
-    async def _get_state(self, phone: str):
+    def _get_state(self, phone: str):
         if not self._redis:
             return None
-        v = await self._redis.get(f"state:{phone}")
+        v = self._redis.get(f"state:{phone}")
         return json.loads(v) if v else None
 
     def _set_state(self, phone: str, state: dict, ttl: int = 3600):
@@ -427,13 +438,13 @@ class AgentService:
             return
         self._redis.delete(f"state:{phone}")
 
-    async def _get_pending_deal(self, vendor_id: str):
+    def _get_pending_deal(self, vendor_id: str):
         if not self._redis:
             return None
-        v = await self._redis.get(f"pending_deal:{vendor_id}")
+        v = self._redis.get(f"pending_deal:{vendor_id}")
         return json.loads(v) if v else None
 
-    def _set_pending_deal(self, vendor_id: str, deal: dict, ttl: int = 7200):
+    def _set_pending_deal(self, vendor_id: str, deal: dict, ttl: int = 1800):
         if not self._redis:
             return
         self._redis.setex(f"pending_deal:{vendor_id}", ttl, json.dumps(deal))
@@ -469,6 +480,34 @@ class AgentService:
             if m in lower:
                 return "es"
         return "en"
+
+    def _upload_menu_image(self, vendor_id: str, image_bytes: bytes, fallback_url: str) -> str:
+        try:
+            import boto3
+            from datetime import datetime, timezone
+
+            key_id = os.getenv("B2_KEY_ID")
+            app_key = os.getenv("B2_APP_KEY")
+            bucket = os.getenv("B2_BUCKET", "infrastreet-bucket")
+            endpoint = os.getenv("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
+            if not endpoint.startswith("http"):
+                endpoint = f"https://{endpoint}"
+            if not key_id or not app_key:
+                return fallback_url
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            key = f"vendors/{vendor_id}/menu_{timestamp}.jpg"
+            s3 = boto3.client(
+                "s3",
+                endpoint_url=endpoint,
+                aws_access_key_id=key_id,
+                aws_secret_access_key=app_key,
+            )
+            s3.put_object(Bucket=bucket, Key=key, Body=image_bytes, ContentType="image/jpeg", ACL="public-read")
+            host = endpoint.replace("https://", "")
+            return f"https://{bucket}.{host}/{key}"
+        except Exception as e:
+            print(f"B2 upload error: {e}")
+            return fallback_url
 
     async def _extract_name_location(self, text: str) -> tuple[str, str]:
         if not self._groq:

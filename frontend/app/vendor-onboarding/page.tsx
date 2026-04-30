@@ -213,7 +213,7 @@ export default function VendorOnboardingPage() {
                     <div className="text-4xl mb-2">📸</div>
                     <div className="text-gray-600">Upload menu photo</div>
                     <div className="text-xs text-gray-400 mt-1">
-                      We'll extract items automatically
+                      We&apos;ll extract items automatically
                     </div>
                     <input
                       type="file"

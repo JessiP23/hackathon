@@ -66,3 +66,19 @@ class UserService:
             }
         finally:
             db.close()
+
+    def set_customer_notifications(self, phone: str, enabled: bool):
+        db = SessionLocal()
+        try:
+            db.execute(
+                text("""
+                    UPDATE customers
+                    SET notifications_enabled = :enabled
+                    WHERE phone = :phone
+                """),
+                {"phone": phone, "enabled": enabled},
+            )
+            db.commit()
+            return {"phone": phone, "notificationsEnabled": enabled}
+        finally:
+            db.close()

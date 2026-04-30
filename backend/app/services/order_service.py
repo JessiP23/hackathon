@@ -32,7 +32,11 @@ class OrderService:
 
             # Decrement quantity
             db.execute(
-                text("UPDATE flash_deals SET remaining_quantity = remaining_quantity - :qty WHERE id = :did"),
+                text("""
+                    UPDATE flash_deals
+                    SET remaining_quantity = remaining_quantity - :qty
+                    WHERE id = :did AND remaining_quantity >= :qty
+                """),
                 {"qty": quantity, "did": deal_id}
             )
 
@@ -63,12 +67,12 @@ class OrderService:
                     "pickup_code": pickup_code,
                 }
             )
-            db.commit()
             row = result.fetchone()
             if row is None:
                 raise RuntimeError("Failed to create order")
             
             order_id = row[0]
+            db.commit()
             
         finally:
             db.close()
@@ -213,7 +217,8 @@ class OrderService:
                  "items": json.dumps(order_items), "total": total, "code": pickup_code}
             )
             db.commit()
-            order_id = result.fetchone()
+            row = result.fetchone()
+            order_id = row[0] if row else None
             return {"orderId": order_id, "vendorId": vendor_id, "items": order_items,
                     "total": total, "status": "pending", "pickupCode": pickup_code}
         finally:

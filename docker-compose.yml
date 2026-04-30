@@ -1,8 +1,59 @@
-version: "3.8"
-
 services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: infrastreet-postgres
+    environment:
+      POSTGRES_USER: infrastreet
+      POSTGRES_PASSWORD: infrastreet
+      POSTGRES_DB: infrastreet
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backend/migrate.sql:/docker-entrypoint-initdb.d/001-migrate.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infrastreet -d infrastreet"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   redis:
     image: redis:7-alpine
     container_name: infrastreet-redis
     ports:
       - "6379:6379"
+
+  mcp-server:
+    build:
+      context: ./mcp-server
+    container_name: infrastreet-mcp
+    environment:
+      PORT: 3001
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "3001:3001"
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./backend
+    container_name: infrastreet-backend
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://infrastreet:infrastreet@postgres:5432/infrastreet
+      REDIS_URL: redis://redis:6379
+      MCP_SERVER_URL: http://mcp-server:3001/mcp
+      CORS_ORIGINS: http://localhost:3000
+      FRONTEND_URL: http://localhost:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+volumes:
+  postgres-data:

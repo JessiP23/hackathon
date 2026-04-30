@@ -109,13 +109,17 @@ class DealService:
                     "media_url": media_url, "lat": lat, "lng": lng,
                 }
             )
+            row = result.fetchone()
+            if row is None:
+                raise RuntimeError("Failed to create flash deal")
+            deal_id = row[0]
             db.commit()
-            deal_id = result.fetchone()
 
             # Fan out notifications asynchronously
             if status == "active":
                 deal_info = {
                     "deal_id": deal_id, "vendor_id": vendor_id,
+                    "vendor_name": data.get("vendor_name", ""),
                     "item_name": item_name, "deal_price": deal_price,
                     "original_price": original_price, "discount_pct": discount_pct,
                     "quantity": quantity, "end_time": end_time,
@@ -158,18 +162,26 @@ class DealService:
         db = SessionLocal()
         try:
             db.execute(
-                text("UPDATE flash_deals SET status = 'cancelled' WHERE id = :id AND vendor_id = :vid"),
+                text("""
+                    UPDATE flash_deals
+                    SET status = 'cancelled',
+                        remaining_quantity = total_quantity
+                    WHERE id = :id
+                      AND vendor_id = :vid
+                      AND status IN ('active', 'scheduled')
+                """),
                 {"id": deal_id, "vid": vendor_id}
             )
             # Get paid orders to refund
             orders = db.execute(
-                text("SELECT id, stripe_payment_intent FROM orders WHERE deal_id = :did AND status = 'paid'"),
+                text("SELECT id, customer_phone, stripe_payment_intent FROM orders WHERE deal_id = :did AND status = 'paid'"),
                 {"did": deal_id}
             ).fetchall()
             db.commit()
 
             refunds = 0
             from app.services.stripe_service import stripe_service
+            from app.services.notify_service import notify_service
             for o in orders:
                 if o.stripe_payment_intent:
                     r = stripe_service.refund_payment_intent(o.stripe_payment_intent)
@@ -179,6 +191,10 @@ class DealService:
                             {"oid": o.id}
                         )
                         refunds += 1
+                notify_service.notify_customer_confirmation(
+                    o.customer_phone,
+                    "El vendor cancelo este deal. Tu pago sera reembolsado en 3-5 dias."
+                )
             db.commit()
             return {"cancelled": True, "refunds_issued": refunds}
         finally:
@@ -211,6 +227,9 @@ class DealService:
             db.execute(
                 text("UPDATE flash_deals SET status = 'active' WHERE status = 'scheduled' AND start_at <= NOW()")
             )
+            db.execute(
+                text("UPDATE flash_deals SET status = 'sold_out' WHERE status = 'active' AND remaining_quantity = 0")
+            )
             db.commit()
         finally:
             db.close()
@@ -227,12 +246,12 @@ class DealService:
                         v.reliability_score,
                         (SELECT item_name FROM flash_deals fd2
                          WHERE fd2.vendor_id = :vid
-                           AND fd2.created_at > NOW() - INTERVAL ':days days'
+                           AND fd2.created_at > NOW() - (:days * INTERVAL '1 day')
                          GROUP BY item_name ORDER BY COUNT(*) DESC LIMIT 1) as top_item
                     FROM vendors v
                     LEFT JOIN orders o ON o.vendor_id = :vid
                         AND o.status = 'fulfilled'
-                        AND o.created_at > NOW() - INTERVAL ':days days'
+                        AND o.created_at > NOW() - (:days * INTERVAL '1 day')
                     WHERE v.id = :vid
                     GROUP BY v.reliability_score
                 """),

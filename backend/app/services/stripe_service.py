@@ -3,6 +3,7 @@ Stripe service — Checkout session creation, webhook handling, and refunds.
 """
 import os
 import json
+from datetime import datetime, timedelta, timezone
 
 try:
     import stripe
@@ -42,15 +43,7 @@ class StripeService:
                         "product_data": {
                             "name": f"{item_name} x{quantity}",
                         },
-                        "unit_amount": int(vendor_price * 100),
-                    },
-                    "quantity": quantity,
-                },
-                {
-                    "price_data": {
-                        "currency": "usd",
-                        "product_data": {"name": "Service fee"},
-                        "unit_amount": int(service_fee * 100),
+                        "unit_amount": int(customer_total * 100),
                     },
                     "quantity": 1,
                 },
@@ -58,6 +51,7 @@ class StripeService:
             mode="payment",
             success_url=f"{FRONTEND_URL}/order/{order_id}/confirmed",
             cancel_url=f"{FRONTEND_URL}/deal/{deal_id}",
+            expires_at=int((datetime.now(timezone.utc) + timedelta(minutes=30)).timestamp()),
             metadata={
                 "order_id": order_id,
                 "vendor_id": vendor_id,

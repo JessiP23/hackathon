@@ -78,7 +78,7 @@ export default function SearchPage() {
             <div className="mb-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
               <div className="inline-block bg-white/10 rounded-2xl px-5 py-3 border border-white/10">
                 <p className="text-sm text-neutral-300">
-                  <span className="text-neutral-500 mr-2">You said:</span>"{transcript}"
+                  <span className="text-neutral-500 mr-2">You said:</span>&quot;{transcript}&quot;
                 </p>
               </div>
             </div>
