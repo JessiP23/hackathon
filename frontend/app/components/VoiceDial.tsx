@@ -88,12 +88,16 @@ export default function VoiceDial({ onTranscript, className, disabled }: Props) 
     setRecording(false);
   }
 
+  const base =
+    "shrink-0 w-14 h-14 rounded-full text-white text-xl flex items-center justify-center shadow-lg active:scale-95 transition-colors disabled:opacity-40 disabled:pointer-events-none border border-white/10";
+
   return (
     <button
+      type="button"
+      aria-label={recording ? "Stop listening" : "Search by voice"}
+      disabled={disabled}
       onClick={handleClick}
-      className={`fixed bottom-6 right-6 w-16 h-16 rounded-full text-white text-2xl flex items-center justify-center shadow-lg active:scale-95 transition-colors ${
-        recording ? "bg-red-500 animate-pulse" : "bg-black"
-      }`}
+      className={`${base} ${recording ? "bg-red-500 animate-pulse" : "bg-neutral-900 hover:bg-neutral-800"} ${className ?? ""}`}
     >
       {recording ? "⏹" : "🎤"}
     </button>

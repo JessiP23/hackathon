@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { getCurrentLocation } from "@/app/services/location";
 import { sendVoiceTranscript } from "@/app/services/voice";
@@ -8,13 +8,40 @@ import VoiceDial from "@/app/components/VoiceDial";
 import MapView from "@/app/components/MapView";
 import { Vendor, Location, VoiceResponse } from "@/app/shared/types";
 
+const QUICK_FOOD_PICKS = ["tacos", "ramen", "pizza", "empanadas", "falafel"];
+
+function uniqueMatchingLabels(vendors: Vendor[], limit = 10): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of vendors) {
+    for (const item of v.matchingItems ?? []) {
+      const raw = item.name.trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(raw);
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+
 export default function SearchPage() {
   const [location, setLocation] = useState<Location | null>(null);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [transcript, setTranscript] = useState("");
+  const [queryInput, setQueryInput] = useState("");
   const [hoveredVendor, setHoveredVendor] = useState<string | null>(null);
+
+  const refineChips = useMemo(() => {
+    const labels = uniqueMatchingLabels(vendors);
+    const q = transcript.trim().toLowerCase();
+    if (!q) return labels;
+    return labels.filter((label) => label.trim().toLowerCase() !== q);
+  }, [vendors, transcript]);
 
   useEffect(() => {
     getCurrentLocation()
@@ -24,12 +51,15 @@ export default function SearchPage() {
 
   async function handleVoice(text: string) {
     if (!location) return;
-    setTranscript(text);
+    const q = text.trim();
+    if (!q) return;
+    setQueryInput(q);
+    setTranscript(q);
     setLoading(true);
     setMessage("");
 
     try {
-      const res: VoiceResponse = await sendVoiceTranscript(text, location.lat, location.lng);
+      const res: VoiceResponse = await sendVoiceTranscript(q, location.lat, location.lng);
       setVendors(res.results || []);
       setMessage(res.message);
     } catch {
@@ -37,6 +67,11 @@ export default function SearchPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function onSearchSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    handleVoice(queryInput);
   }
 
   return (
@@ -72,13 +107,13 @@ export default function SearchPage() {
 
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-lg mx-auto px-5 pt-6 pb-40">
+        <div className="max-w-lg mx-auto px-5 pt-6 pb-44">
           {/* Transcript */}
           {transcript && (
             <div className="mb-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
               <div className="inline-block bg-white/10 rounded-2xl px-5 py-3 border border-white/10">
                 <p className="text-sm text-neutral-300">
-                  <span className="text-neutral-500 mr-2">You said:</span>&quot;{transcript}&quot;
+                  <span className="text-neutral-500 mr-2">Searching:</span>&quot;{transcript}&quot;
                 </p>
               </div>
             </div>
@@ -111,12 +146,20 @@ export default function SearchPage() {
                 </div>
               </div>
               <h2 className="text-3xl font-black mb-3">What are you craving?</h2>
-              <p className="text-neutral-500 text-lg">Hold the button and speak</p>
+              <p className="text-neutral-500 text-lg max-w-xs mx-auto">
+                Type below, tap a suggestion, or use the mic
+              </p>
               <div className="mt-8 flex flex-wrap justify-center gap-2">
-                {["tacos", "ramen", "pizza", "empanadas", "falafel"].map((food) => (
-                  <span key={food} className="px-4 py-2 rounded-full bg-white/5 text-neutral-400 text-sm border border-white/5">
+                {QUICK_FOOD_PICKS.map((food) => (
+                  <button
+                    key={food}
+                    type="button"
+                    disabled={!location || loading}
+                    onClick={() => handleVoice(food)}
+                    className="px-4 py-2 rounded-full bg-white/5 text-neutral-300 text-sm border border-white/10 hover:bg-white/10 hover:border-white/20 transition-colors disabled:opacity-40"
+                  >
                     {food}
-                  </span>
+                  </button>
                 ))}
               </div>
             </div>
@@ -130,13 +173,40 @@ export default function SearchPage() {
                   {vendors.length} {vendors.length === 1 ? "result" : "results"}
                 </h3>
                 <button
-                  onClick={() => { setVendors([]); setTranscript(""); setMessage(""); }}
+                  type="button"
+                  onClick={() => {
+                    setVendors([]);
+                    setTranscript("");
+                    setMessage("");
+                    setQueryInput("");
+                  }}
                   className="text-neutral-500 text-sm hover:text-white transition-colors"
                 >
                   Clear
                 </button>
               </div>
-              
+
+              {refineChips.length > 0 && (
+                <div className="mb-5">
+                  <p className="text-neutral-500 text-xs font-medium uppercase tracking-wider mb-2">
+                    Also try
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {refineChips.map((label) => (
+                      <button
+                        key={label}
+                        type="button"
+                        disabled={loading}
+                        onClick={() => handleVoice(label)}
+                        className="px-3 py-1.5 rounded-full text-sm bg-green-500/10 text-green-300 border border-green-500/25 hover:bg-green-500/20 transition-colors disabled:opacity-40"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-3">
                 {vendors.map((v, index) => (
                   <Link
@@ -188,10 +258,32 @@ export default function SearchPage() {
         </div>
       </div>
 
-      {/* Voice Button */}
-      <div className="fixed bottom-0 left-0 right-0 pb-8 pt-20 bg-gradient-to-t from-neutral-950 via-neutral-950/95 to-transparent pointer-events-none z-10">
+      {/* Search bar + voice */}
+      <div className="fixed bottom-0 left-0 right-0 z-10 pt-16 pb-6 bg-gradient-to-t from-neutral-950 via-neutral-950/98 to-transparent pointer-events-none">
         <div className="max-w-lg mx-auto px-5 pointer-events-auto">
-          <VoiceDial onTranscript={handleVoice} />
+          <form
+            onSubmit={onSearchSubmit}
+            className="flex items-center gap-2 rounded-2xl bg-white/10 border border-white/10 p-2 pl-4 shadow-xl shadow-black/40"
+          >
+            <input
+              type="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              placeholder={location ? "Tacos, coffee, bakery…" : "Enable location to search"}
+              disabled={!location || loading}
+              value={queryInput}
+              onChange={(e) => setQueryInput(e.target.value)}
+              className="flex-1 min-w-0 bg-transparent text-white placeholder:text-neutral-500 text-sm outline-none py-2"
+            />
+            <button
+              type="submit"
+              disabled={!location || loading || !queryInput.trim()}
+              className="shrink-0 rounded-xl bg-white text-neutral-950 text-sm font-semibold px-4 py-2.5 disabled:opacity-40 hover:bg-neutral-200 transition-colors"
+            >
+              Search
+            </button>
+            <VoiceDial onTranscript={handleVoice} disabled={!location || loading} />
+          </form>
         </div>
       </div>
     </main>
