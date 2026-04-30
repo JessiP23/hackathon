@@ -31,12 +31,16 @@ interface SpeechWindow extends Window {
 
 interface Props {
   onTranscript: (transcript: string) => void;
+  /** Inline with search bar; omit fixed bottom-right positioning */
+  className?: string;
+  disabled?: boolean;
 }
 
-export default function VoiceDial({ onTranscript }: Props) {
+export default function VoiceDial({ onTranscript, className, disabled }: Props) {
   const [recording, setRecording] = useState(false);
 
   async function handleClick() {
+    if (disabled) return;
     // Fall back to prompt if Web Speech API not available
     const speechWindow = window as SpeechWindow;
     if (!speechWindow.webkitSpeechRecognition && !speechWindow.SpeechRecognition) {
