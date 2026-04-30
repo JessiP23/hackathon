@@ -35,6 +35,14 @@ npm run dev
 
 Open `http://localhost:3000`. Backend health is `http://localhost:8000/health`; MCP runs at `http://localhost:3001/mcp`.
 
+## Twilio (easiest path — one Messaging Service)
+
+**Env:** Set `TWILIO_MESSAGING_SERVICE_SID=MG...` (one service). Optionally set `TWILIO_MESSAGING_SERVICE_SID_VENDOR` / `_CUSTOMER` later for two pools; if unset, both use the single SID.
+
+**Twilio Console:** Messaging → Services → create service → add **one** SMS-capable phone number → Integration → “When a message comes in” → `POST` → `https://<your-api-host>/sms/vendor`
+
+**Fly:** `PUBLIC_BASE_URL=https://infrastreet-api.fly.dev` (must match the URL Twilio calls; no trailing slash).
+
 ## Twilio Local Test
 1. Run `ngrok http 8000`.
 2. Set `PUBLIC_BASE_URL` in `backend/.env` to the ngrok HTTPS URL.
