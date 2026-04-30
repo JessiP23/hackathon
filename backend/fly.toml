@@ -1,25 +1,23 @@
-# Fly.io — InfraStreet API (FastAPI)
-# From backend/: fly launch (first time) or fly deploy
-# Set secrets: fly secrets set DATABASE_URL=... STRIPE_SECRET_KEY=... STRIPE_WEBHOOK_SECRET=...
+# fly.toml app configuration file generated for infrastreet-api on 2026-04-29T23:00:03-04:00
 #
-# Stripe webhook URL after deploy:
-#   https://<your-app-name>.fly.dev/webhook/stripe
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "infrastreet-api"
-primary_region = "iad"
+app = 'infrastreet-api'
+primary_region = 'iad'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ["app"]
+  processes = ['app']
 
 [[vm]]
-  memory = "512mb"
-  cpu_kind = "shared"
+  memory = '512mb'
   cpus = 1
+  memory_mb = 512
