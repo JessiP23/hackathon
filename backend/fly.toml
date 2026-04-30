@@ -1,0 +1,25 @@
+# Fly.io — InfraStreet API (FastAPI)
+# From backend/: fly launch (first time) or fly deploy
+# Set secrets: fly secrets set DATABASE_URL=... STRIPE_SECRET_KEY=... STRIPE_WEBHOOK_SECRET=...
+#
+# Stripe webhook URL after deploy:
+#   https://<your-app-name>.fly.dev/webhook/stripe
+
+app = "infrastreet-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
