@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import vendors, orders, deals, voice, user
 from app.routers.webhook import router as webhook_router
 from app.routers.stripe_webhook import router as stripe_router
+from app.routers.telegram_webhook import router as telegram_router
+from app.routers.short_link import router as short_link_router
 
 app = FastAPI(title="InfraStreet API")
 
@@ -22,6 +24,8 @@ app.include_router(orders.router, prefix="/orders", tags=["orders"])
 app.include_router(deals.router, prefix="/deals", tags=["deals"])
 app.include_router(voice.router, tags=["voice"])
 app.include_router(webhook_router, tags=["webhooks"])
+app.include_router(telegram_router, tags=["telegram"])
+app.include_router(short_link_router, tags=["links"])
 app.include_router(stripe_router, tags=["stripe"])
 
 

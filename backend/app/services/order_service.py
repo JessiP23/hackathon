@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import string
 from app.db import SessionLocal
@@ -139,13 +140,15 @@ class OrderService:
                 f"Código: {row.pickup_code}"
             )
             # Notify vendor
+            fe = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
             notify_service.notify_vendor_order(
                 row.vendor_phone,
                 f"🛒 Nueva orden #{row.pickup_code}\n"
                 f"• {qty}x {row.deal_item}\n"
                 f"• Total: ${float(row.total or 0) - float(row.service_fee or 0):.2f}\n"
                 f"• Cliente: {row.customer_phone}\n"
-                f"• Pickup: antes de {end_str}"
+                f"• Pickup: antes de {end_str}\n"
+                f"{fe}/orders/{order_id}"
             )
 
         return {"ok": True}

@@ -127,3 +127,11 @@ ALTER TABLE orders ADD CONSTRAINT orders_status_check CHECK (status IN (
     'pending_payment','paid','payment_failed','expired',
     'fulfilled','refunded','reserved_unpaid','no_show','pending'
 ));
+
+-- v3.2 — customer Telegram + notification channel
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS telegram_id BIGINT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS customers_telegram_id_uidx
+    ON customers (telegram_id) WHERE telegram_id IS NOT NULL;
+ALTER TABLE customers DROP CONSTRAINT IF EXISTS customers_notification_channel_check;
+ALTER TABLE customers ADD CONSTRAINT customers_notification_channel_check
+    CHECK (notification_channel IN ('sms', 'telegram', 'both'));

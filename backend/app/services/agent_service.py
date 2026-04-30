@@ -1,8 +1,8 @@
 from __future__ import annotations
 """
 InfraStreet AI Agent — Groq-powered conversation engine.
-Handles vendor onboarding, menu OCR, deal creation, and customer interactions
-over WhatsApp/SMS. Conversation state stored in Redis.
+Vendor flows: Telegram DM (primary MVP path) or Twilio SMS/MMS.
+Conversation state in Redis; synthetic vendor phone tg:{chat_id} for Telegram.
 """
 import os
 import json
@@ -54,18 +54,52 @@ class AgentService:
     # Main entry point
     # ──────────────────────────────────────────────────────────────
     async def handle_vendor_message(
-        self, phone: str, text_body: str, media_url: str | None = None
+        self,
+        phone: str,
+        text_body: str,
+        media_url: str | None = None,
+        image_bytes: bytes | None = None,
+        telegram_language_code: str | None = None,
     ) -> str:
         vendor = self._get_vendor_by_phone(phone)
         state = self._get_state(phone)
-        lang = self._get_lang(phone) or self._detect_lang(text_body)
+
+        stored_lang = self._get_lang(phone)
+        if stored_lang:
+            lang = stored_lang
+        elif telegram_language_code:
+            lang = "es" if telegram_language_code.startswith("es") else "en"
+        else:
+            lang = self._detect_lang(text_body)
+
+        low = text_body.strip().lower()
+        if low in ("/start", "/help"):
+            self._set_lang(phone, lang)
+            if vendor:
+                return (
+                    "Ya estas en InfraStreet. Escribe FLASH para un deal."
+                    if lang == "es"
+                    else "You're on InfraStreet. Send FLASH to launch a deal."
+                )
+            return await self._onboard_step1(phone, text_body, telegram_language_code)
+
         self._set_lang(phone, lang)
+
+        # Photo before we have a vendor record — menu step comes after name/location.
+        if not vendor and image_bytes:
+            return (
+                "Primero el nombre de tu negocio y ubicacion (texto o pin)."
+                if lang == "es"
+                else "First send your business name and location (text or location pin)."
+            )
 
         # New vendor — continue or start SMS onboarding before a DB record exists.
         if not vendor:
+            if state and state.get("step") == "awaiting_name_only":
+                return await self._onboard_step_after_pin(phone, text_body, lang)
             if state and state.get("step") == "awaiting_name_location":
                 return await self._onboard_step2(phone, text_body, lang)
-            return await self._onboard_step1(phone, text_body)
+            return await self._onboard_step1(phone, text_body, telegram_language_code)
 
         vendor_id = vendor["id"]
 
@@ -91,8 +125,8 @@ class AgentService:
             return await self._handle_deal_clarification(phone, vendor_id, text_body, lang)
 
         # Media → menu OCR or deal media
-        if media_url:
-            return await self._handle_media(phone, vendor_id, media_url, lang)
+        if media_url or image_bytes:
+            return await self._handle_media(phone, vendor_id, media_url, lang, image_bytes=image_bytes)
 
         # Deal intent
         if self._is_deal_intent(text_body):
@@ -104,13 +138,95 @@ class AgentService:
     # ──────────────────────────────────────────────────────────────
     # Onboarding
     # ──────────────────────────────────────────────────────────────
-    async def _onboard_step1(self, phone: str, text_body: str) -> str:
-        lang = self._detect_lang(text_body)
+    async def _onboard_step1(
+        self, phone: str, text_body: str, telegram_language_code: str | None = None
+    ) -> str:
+        low = text_body.strip().lower()
+        if telegram_language_code and low in ("/start", "/help", ""):
+            lang = "es" if telegram_language_code.startswith("es") else "en"
+        else:
+            lang = self._detect_lang(text_body)
         self._set_lang(phone, lang)
         self._set_state(phone, {"step": "awaiting_name_location"}, ttl=1800)
         if lang == "es":
-            return "Hola! Bienvenido a InfraStreet. Como se llama tu negocio y en que colonia o calle estas?"
-        return "Hey! Welcome to InfraStreet 🌮 What's your business name and where are you located?"
+            return (
+                "Hola! Bienvenido a InfraStreet 🌮 Como se llama tu negocio y donde estas? "
+                "Manda tu ubicacion o escribe la colonia."
+            )
+        return (
+            "Hey! Welcome to InfraStreet 🌮 What's your business name and location? "
+            "Send a pin or type your area."
+        )
+
+    async def handle_vendor_location(
+        self,
+        phone: str,
+        lat: float,
+        lng: float,
+        telegram_language_code: str | None = None,
+    ) -> str:
+        vendor = self._get_vendor_by_phone(phone)
+        if vendor:
+            stored_lang = self._get_lang(phone)
+            lang = stored_lang or (
+                "es" if (telegram_language_code or "").startswith("es") else "en"
+            )
+            return (
+                "Ya estas registrado. Escribe FLASH para un deal."
+                if lang == "es"
+                else "You're registered. Send FLASH to post a deal."
+            )
+
+        stored_lang = self._get_lang(phone)
+        if stored_lang:
+            lang = stored_lang
+        elif telegram_language_code:
+            lang = "es" if telegram_language_code.startswith("es") else "en"
+        else:
+            lang = "es"
+        self._set_lang(phone, lang)
+
+        state = self._get_state(phone)
+        if state and state.get("step") == "awaiting_name_location":
+            self._set_state(phone, {"step": "awaiting_name_only", "lat": lat, "lng": lng}, ttl=1800)
+            return "Como se llama tu negocio?" if lang == "es" else "What's your business name?"
+
+        self._set_state(phone, {"step": "awaiting_name_only", "lat": lat, "lng": lng}, ttl=1800)
+        return "Como se llama tu negocio?" if lang == "es" else "What's your business name?"
+
+    async def _onboard_step_after_pin(self, phone: str, text_body: str, lang: str) -> str:
+        state = self._get_state(phone) or {}
+        lat = state.get("lat")
+        lng = state.get("lng")
+        name = text_body.strip()
+        if not name:
+            return "Necesito el nombre del negocio." if lang == "es" else "I need your business name."
+        if lat is None or lng is None:
+            return await self._onboard_step2(phone, text_body, lang)
+
+        db = SessionLocal()
+        try:
+            import uuid as _uuid
+
+            vid = f"v_{_uuid.uuid4().hex[:8]}"
+            db.execute(
+                text("""
+                    INSERT INTO vendors (id, name, phone, location)
+                    VALUES (:id, :name, :phone,
+                            ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography)
+                    ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name
+                    RETURNING id
+                """),
+                {"id": vid, "name": name, "phone": phone, "lat": float(lat), "lng": float(lng)},
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        self._set_state(phone, {"step": "awaiting_menu_photo"}, ttl=1800)
+        if lang == "es":
+            return "Perfecto! Ahora manda foto de tu menu."
+        return "Perfect! Now send a photo of your menu."
 
     async def _onboard_step2(self, phone: str, text_body: str, lang: str) -> str:
         # Parse name + location from free text using Groq
@@ -140,34 +256,45 @@ class AgentService:
 
         self._set_state(phone, {"step": "awaiting_menu_photo"}, ttl=1800)
         if lang == "es":
-            return "Perfecto! Ahora manda una foto de tu menu o tus productos como MMS."
-        return "Perfect! Now send a photo of your menu or products as a picture message."
+            return "Perfecto! Ahora manda foto de tu menu."
+        return "Perfect! Now send a photo of your menu."
 
     # ──────────────────────────────────────────────────────────────
     # Menu handling
     # ──────────────────────────────────────────────────────────────
-    async def _handle_media(self, phone: str, vendor_id: str, media_url: str, lang: str) -> str:
+    async def _handle_media(
+        self,
+        phone: str,
+        vendor_id: str,
+        media_url: str | None,
+        lang: str,
+        image_bytes: bytes | None = None,
+    ) -> str:
         # If deal is being created, attach media to pending deal
         pending = self._get_pending_deal(vendor_id)
         if pending:
-            pending["media_url"] = media_url
+            pending["media_url"] = media_url or pending.get("media_url")
             self._set_pending_deal(vendor_id, pending)
             return "Foto guardada. Ahora dime los detalles del deal." if lang == "es" else "Photo saved. Now tell me the deal details."
 
         # Otherwise treat as menu upload
-        # Fetch image and run OCR
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.get(
-                    media_url,
-                    auth=(os.getenv("TWILIO_ACCOUNT_SID", ""), os.getenv("TWILIO_AUTH_TOKEN", "")),
-                )
-                image_bytes = resp.content
-        except Exception as e:
-            return f"No pude descargar la imagen: {e}" if lang == "es" else f"Could not download image: {e}"
+        if image_bytes is None:
+            if not media_url:
+                return "Manda una foto del menu." if lang == "es" else "Send a menu photo."
+            try:
+                import httpx
 
-        stored_url = self._upload_menu_image(vendor_id, image_bytes, media_url)
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    resp = await client.get(
+                        media_url,
+                        auth=(os.getenv("TWILIO_ACCOUNT_SID", ""), os.getenv("TWILIO_AUTH_TOKEN", "")),
+                    )
+                    image_bytes = resp.content
+            except Exception as e:
+                return f"No pude descargar la imagen: {e}" if lang == "es" else f"Could not download image: {e}"
+
+        fallback_url = media_url or "telegram:image"
+        stored_url = self._upload_menu_image(vendor_id, image_bytes, fallback_url)
         from app.services.ocr_service import OCRService
         try:
             ocr = OCRService()
