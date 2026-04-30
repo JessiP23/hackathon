@@ -1,5 +1,10 @@
+# Supabase users: keep DATABASE_URL in backend/.env pointed at Supabase.
+# Do not start local Postgres unless you need it:
+#   docker compose --profile local-db up --build
 services:
   postgres:
+    profiles:
+      - local-db
     image: postgis/postgis:16-3.4
     container_name: infrastreet-postgres
     environment:
@@ -42,7 +47,7 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: postgresql://infrastreet:infrastreet@postgres:5432/infrastreet
+      # DATABASE_URL comes from backend/.env only — use Supabase URI there for hosted DB.
       REDIS_URL: redis://redis:6379
       MCP_SERVER_URL: http://mcp-server:3001/mcp
       CORS_ORIGINS: http://localhost:3000
@@ -50,8 +55,6 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_started
 
