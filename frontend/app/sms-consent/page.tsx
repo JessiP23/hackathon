@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "SMS terms & consent | InfraStreet",
+  title: "SMS terms & consent",
   description:
     "How InfraStreet collects SMS opt-in, messaging use cases, sample messages, and compliance contact.",
 };
