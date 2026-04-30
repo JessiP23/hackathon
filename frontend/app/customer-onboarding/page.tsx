@@ -8,6 +8,7 @@ import { registerUser } from "@/app/services/api";
 export default function CustomerOnboardingPage() {
   const router = useRouter();
   const [phone, setPhone] = useState("");
+  const [smsConsent, setSmsConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -18,6 +19,10 @@ export default function CustomerOnboardingPage() {
     const cleanPhone = phone.replace(/\D/g, "");
     if (cleanPhone.length < 10) {
       setError("Enter a valid phone number");
+      return;
+    }
+    if (!smsConsent) {
+      setError("Confirm SMS consent to continue.");
       return;
     }
 
@@ -63,6 +68,30 @@ export default function CustomerOnboardingPage() {
                 autoFocus
               />
             </div>
+
+            <label className="flex items-start gap-3 cursor-pointer text-sm text-neutral-400 leading-snug">
+              <input
+                type="checkbox"
+                checked={smsConsent}
+                onChange={(e) => setSmsConsent(e.target.checked)}
+                className="mt-1 rounded border-white/20 bg-white/5"
+              />
+              <span>
+                I agree to receive SMS from InfraStreet about my orders and,
+                if I enable deal alerts, occasional texts about nearby flash
+                deals. Message frequency varies. Msg & data rates may apply. Reply
+                STOP to opt out of deal alerts. See{" "}
+                <Link
+                  href="/sms-consent"
+                  className="text-orange-400 hover:underline"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  SMS terms & consent
+                </Link>
+                .
+              </span>
+            </label>
 
             {error && (
               <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-xl text-sm">

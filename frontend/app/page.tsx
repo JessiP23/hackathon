@@ -113,6 +113,11 @@ export default function LandingPage() {
           <Link href="/vendor-onboarding" className="block w-full border-2 border-white/20 text-white py-4 rounded-2xl text-center font-semibold hover:bg-white/5 transition-colors">
             I&apos;m a Vendor
           </Link>
+          <p className="text-center text-xs text-neutral-600 pt-2">
+            <Link href="/sms-consent" className="underline hover:text-neutral-400">
+              SMS terms & consent
+            </Link>
+          </p>
         </div>
       </div>
     </main>
