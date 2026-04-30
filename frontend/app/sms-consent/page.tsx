@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 function ComplianceEmail() {
   const email =
-    process.env.NEXT_PUBLIC_COMPLIANCE_EMAIL ?? "privacy@infrastreet.app";
+    process.env.NEXT_PUBLIC_COMPLIANCE_EMAIL ?? "privacy@infrastreet.ap";
   return (
     <a
       href={`mailto:${email}`}
