@@ -134,17 +134,25 @@ export default function SmsConsentPage() {
 
         <section className="space-y-3">
           <h2 className="text-lg font-bold text-white">Opt-out & help</h2>
-          <p className="text-neutral-300">
-            You can opt out of optional marketing-style deal alerts by replying{" "}
-            <strong className="text-white">STOP</strong>. Reply{" "}
-            <strong className="text-white">START</strong> to resubscribe to deal
-            alerts where supported. For transactional messages tied to an active
-            order, contact us at the email below if you need help.
+          <p className="bg-white/5 border border-white/10 rounded-xl p-4 text-neutral-200 font-normal">
+            Reply <strong className="text-white">STOP</strong> to cancel optional
+            deal-alert SMS. Reply <strong className="text-white">START</strong>{" "}
+            to opt back into deal alerts where supported. Reply{" "}
+            <strong className="text-white">HELP</strong> for how to contact
+            InfraStreet (see compliance email on this page). Message frequency
+            varies. Message and data rates may apply. Carriers and Twilio may
+            handle STOP/HELP/START per network rules; we honor STOP for supported
+            customer notification flows.
           </p>
           <p className="text-neutral-500 text-sm">
-            Twilio and carriers process STOP/HELP according to their policies;
-            InfraStreet updates notification preferences when STOP is received on
-            supported customer flows.
+            Copy the gray box above into Twilio / carrier fields that ask for{" "}
+            <strong className="text-neutral-400">opt-out language</strong>,{" "}
+            <strong className="text-neutral-400">HELP</strong>, or{" "}
+            <strong className="text-neutral-400">disclosures</strong>.
+          </p>
+          <p className="text-neutral-300 text-sm">
+            For transactional texts tied to an active order (pickup codes,
+            payment issues), contact <ComplianceEmail />.
           </p>
         </section>
 
