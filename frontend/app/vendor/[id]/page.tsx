@@ -59,7 +59,7 @@ export default function VendorPage() {
         alert("Demo: add your phone on Get started to place a real order.");
         return;
       }
-      router.push("/customer-onboarding");
+      router.push("/onboard");
       return;
     }
     setOrdering(true);

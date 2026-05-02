@@ -6,6 +6,7 @@ import { getUserByPhone } from "./services/api";
 import { User } from "./shared/types";
 import { MobileAppFrame } from "./components/MobileLayout";
 import { setDemoBrowse } from "./lib/demo";
+import { PillLink, MetricCard } from "./components/Precision";
 
 export default function LandingPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -28,48 +29,41 @@ export default function LandingPage() {
   if (loading) {
     return (
       <MobileAppFrame>
-        <div className="flex min-h-[70vh] items-center justify-center">
-          <div
-            className="aspect-[4/5] w-[min(92vw,380px)] max-h-[70vh] animate-pulse rounded-3xl bg-[var(--infra-tile-1)]"
-            aria-hidden
-          />
-        </div>
+        <main className="page-enter flex min-h-[100dvh] flex-col px-6 pb-12 pt-16">
+          <div className="skeleton mb-3 ml-0 h-4 w-48" />
+          <div className="skeleton mb-8 h-10 w-full max-w-[320px]" />
+          <div className="skeleton h-14 w-full rounded-[12px]" />
+        </main>
       </MobileAppFrame>
     );
   }
 
-  const pillPrimary =
-    "flex h-14 w-full items-center justify-center rounded-[var(--r-pill)] bg-[var(--infra-accent)] text-[17px] font-semibold text-white shadow-lg transition-transform active:scale-[0.98]";
-  const pillSecondary =
-    "flex h-14 w-full items-center justify-center rounded-[var(--r-pill)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-2)] text-[17px] font-semibold text-[var(--infra-ink)] transition-transform active:scale-[0.98]";
-
   if (user) {
     return (
       <MobileAppFrame>
-        <header className="flex h-11 items-center justify-center border-b border-[var(--infra-ink-4)] px-5">
-          <span className="text-[17px] font-semibold tracking-[-0.5px]">
-            InfraStreet<sup className="ml-0.5 align-super text-[9px] font-semibold text-[var(--infra-accent)]">BETA</sup>
+        <header className="flex min-h-[48px] items-center justify-center border-b-[0.5px] border-[var(--is-border-1)] px-5 py-3">
+          <span className="text-[15px] font-semibold tracking-[-0.02em] text-[var(--is-text-1)]">
+            InfraStreet
+            <sup className="ml-0.5 align-super text-[9px] font-semibold text-[var(--is-purple)]">BETA</sup>
           </span>
         </header>
-        <div className="space-y-10 px-6 pb-16 pt-12">
+        <main className="page-enter space-y-10 px-6 pb-16 pt-12">
           <div>
-            <p className="text-[15px] text-[var(--infra-ink-2)]">Welcome back</p>
-            <h1
-              className="mt-2 font-semibold tracking-tight text-[var(--infra-ink)]"
-              style={{ fontSize: "clamp(32px, 8vw, 40px)", letterSpacing: "-0.45px", lineHeight: 1.08 }}
-            >
+            <p className="text-[15px] font-normal tracking-[-0.01em] text-[var(--is-text-2)]">Welcome back</p>
+            <h1 className="mt-2 text-[28px] font-bold leading-[1.15] tracking-[-0.04em] text-[var(--is-text-1)]">
               {user.name || user.phone}
             </h1>
           </div>
 
-          <div className="space-y-3">
-            <Link href="/deals" className={pillPrimary}>
-              Flash deals
-            </Link>
-            <Link href="/search" className={pillSecondary}>
+          <div className="flex flex-col gap-3">
+            <PillLink href="/deals">Flash deals</PillLink>
+            <PillLink href="/search" variant="ghost">
               Find food
-            </Link>
-            <Link href="/orders" className={`${pillSecondary} border-transparent bg-transparent text-[var(--infra-ink-3)]`}>
+            </PillLink>
+            <Link
+              href="/orders"
+              className="flex min-h-[48px] w-full items-center justify-center rounded-[12px] py-3 text-[15px] font-semibold text-[var(--is-text-3)]"
+            >
               My orders
             </Link>
           </div>
@@ -80,63 +74,53 @@ export default function LandingPage() {
               localStorage.clear();
               setUser(null);
             }}
-            className="w-full py-4 text-[15px] text-[var(--infra-ink-3)] active:text-[var(--infra-ink-2)]"
+            className="w-full py-4 text-[15px] text-[var(--is-text-3)]"
           >
             Sign out
           </button>
-        </div>
+        </main>
       </MobileAppFrame>
     );
   }
 
   return (
     <MobileAppFrame>
-      <div className="flex min-h-[100dvh] flex-col px-6 pb-12 pt-12">
-        <div className="flex flex-1 flex-col space-y-12">
-          <div className="text-center pt-4">
-            <h1
-              className="font-semibold leading-none tracking-tight text-[var(--infra-ink)]"
-              style={{ fontSize: "clamp(40px, 11vw, 52px)", letterSpacing: "-0.55px" }}
+      <main className="page-enter flex min-h-[100dvh] flex-col px-6 pb-12 pt-16">
+        <div className="flex flex-1 flex-col">
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--is-text-4)]">
+            Street food, one tap away
+          </p>
+          <h1 className="max-w-[340px] text-[32px] font-bold leading-[1.15] tracking-[-0.04em] text-[var(--is-text-1)]">
+            Your neighborhood&apos;s best stalls. Right now.
+          </h1>
+          <p className="mt-4 max-w-[320px] text-[15px] font-normal leading-snug tracking-[-0.01em] text-[var(--is-text-2)]">
+            Flash deals expire. Real vendors. Real food.
+          </p>
+
+          <div className="mt-8 flex flex-col gap-3">
+            <PillLink href="/onboard">Get started</PillLink>
+            <Link
+              href="/deals"
+              onClick={() => setDemoBrowse()}
+              className="flex min-h-[48px] w-full items-center justify-center rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-card)] py-[15px] text-[15px] font-semibold tracking-[-0.01em] text-[var(--is-text-2)] active:scale-[0.98] active:opacity-[0.82]"
             >
-              Infra<span className="text-[var(--infra-accent)]">Street</span>
-            </h1>
-            <p className="mx-auto mt-5 max-w-[300px] text-[17px] leading-snug text-[var(--infra-ink-2)]">
-              Flash deals & stalls near you. Customer PWA — vendors run on Telegram.
-            </p>
+              See deals near me
+            </Link>
           </div>
 
-          <div className="space-y-6 rounded-[var(--r-xl)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-1)] p-6">
-            {[
-              ["Browse deals", "Swipe nearby flash deals; checkout after you save your number."],
-              ["Find stalls", "OpenStreetMap + search — real pins from active vendors."],
-              ["Get started", "Optional phone + SMS consent when you want orders & alerts."],
-            ].map(([title, sub]) => (
-              <div key={title as string}>
-                <p className="text-[17px] font-semibold tracking-tight text-[var(--infra-ink)]">{title}</p>
-                <p className="mt-1 text-[15px] leading-snug text-[var(--infra-ink-2)]">{sub}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-3 pt-6">
-          <Link href="/customer-onboarding" className={pillPrimary}>
-            Get started (phone + SMS)
-          </Link>
-          <Link
-            href="/deals"
-            className={pillSecondary}
-            onClick={() => setDemoBrowse()}
-          >
-            Browse deals without signing in
-          </Link>
-          <p className="pt-2 text-center text-[13px] text-[var(--infra-ink-3)]">
-            <Link href="/sms-consent" className="text-[var(--infra-blue)] underline underline-offset-2">
-              SMS terms & consent
+          <p className="mt-6 text-center text-[11px] text-[var(--is-text-4)]">
+            <Link href="/sms-consent" className="text-[var(--is-blue)] underline underline-offset-2">
+              SMS terms
             </Link>
           </p>
         </div>
-      </div>
+
+        <div className="mt-8 grid grid-cols-3 gap-3">
+          <MetricCard label="Vendors active" value="847" />
+          <MetricCard label="Deals today" value="2.4k" valueClassName="text-[var(--is-green)]" />
+          <MetricCard label="Avg price" value="$6–18" valueClassName="text-[var(--is-purple)]" />
+        </div>
+      </main>
     </MobileAppFrame>
   );
 }

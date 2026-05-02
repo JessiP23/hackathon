@@ -12,10 +12,21 @@ function initialCenter(userLocation: Location | null, vendors: Vendor[]): [numbe
   return null;
 }
 
+function pinIcon(highlighted: boolean): L.DivIcon {
+  return L.divIcon({
+    className: `is-map-pin${highlighted ? " is-map-pin--hl" : ""}`,
+    html: '<div class="is-map-pin-inner"></div>',
+    iconSize: [32, 32],
+    iconAnchor: [16, 32],
+    popupAnchor: [0, -28],
+  });
+}
+
 type Props = {
   userLocation: Location | null;
   vendors: Vendor[];
   highlightedVendorId: string | null;
+  onVendorSelect?: (v: Vendor) => void;
   className?: string;
 };
 
@@ -23,11 +34,14 @@ export default function OsmMapInner({
   userLocation,
   vendors,
   highlightedVendorId,
+  onVendorSelect,
   className,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
+  const onVendorSelectRef = useRef(onVendorSelect);
+  onVendorSelectRef.current = onVendorSelect;
 
   useEffect(() => {
     return () => {
@@ -50,10 +64,10 @@ export default function OsmMapInner({
         scrollWheelZoom: true,
       }).setView(center, 14);
 
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 19,
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        attribution: "© OpenStreetMap © CARTO",
+        subdomains: "abcd",
+        maxZoom: 20,
       }).addTo(map);
 
       layerRef.current = L.layerGroup().addTo(map);
@@ -88,16 +102,15 @@ export default function OsmMapInner({
       const { lat, lng } = v.location;
       latlngs.push([lat, lng]);
       const hl = highlightedVendorId === v.vendorId;
-      L.circleMarker([lat, lng], {
-        radius: hl ? 11 : 7,
-        fillColor: "#ff3b30",
-        color: "#ffffff",
-        weight: hl ? 3 : 2,
-        opacity: 1,
-        fillOpacity: 1,
-      })
-        .bindPopup(`<strong>${escapeHtml(v.name)}</strong>`)
-        .addTo(lg);
+      const mk = L.marker([lat, lng], {
+        icon: pinIcon(hl),
+        riseOnHover: true,
+      });
+      mk.bindPopup(`<strong>${escapeHtml(v.name)}</strong>`);
+      mk.on("click", () => {
+        onVendorSelectRef.current?.(v);
+      });
+      mk.addTo(lg);
     });
 
     if (latlngs.length === 0) return;
@@ -117,7 +130,7 @@ export default function OsmMapInner({
   return (
     <div
       ref={containerRef}
-      className={`z-0 min-h-[12rem] w-full overflow-hidden rounded-[var(--r-lg,22px)] border border-white/[0.08] ${className ?? ""}`}
+      className={`z-0 min-h-[12rem] w-full overflow-hidden rounded-[16px] border-[0.5px] border-[var(--is-border-1)] ${className ?? ""}`}
     />
   );
 }

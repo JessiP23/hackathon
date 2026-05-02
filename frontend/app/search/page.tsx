@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, useCallback, type FormEvent } from "react";
 import Link from "next/link";
 import { getCurrentLocation } from "@/app/services/location";
 import { sendVoiceTranscript } from "@/app/services/voice";
 import { getVendorsNearby } from "@/app/services/api";
 import VoiceDial from "@/app/components/VoiceDial";
 import OsmMapView from "@/app/components/OsmMapView";
+import { MobileAppFrame } from "@/app/components/MobileLayout";
+import { PillButton, StatusPill, DataCard, PillLink } from "@/app/components/Precision";
 import { Vendor, Location, VoiceResponse } from "@/app/shared/types";
-
-const accent = "#ff3b30";
 
 const QUICK_FOOD_PICKS = ["tacos", "ramen", "pizza", "empanadas", "falafel"];
 
@@ -39,6 +39,8 @@ export default function SearchPage() {
   const [transcript, setTranscript] = useState("");
   const [queryInput, setQueryInput] = useState("");
   const [hoveredVendor, setHoveredVendor] = useState<string | null>(null);
+  const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
 
   const refineChips = useMemo(() => {
     const labels = uniqueMatchingLabels(vendors);
@@ -54,12 +56,10 @@ export default function SearchPage() {
 
   const mapPins = useMemo(() => mapVendors.filter((v) => v.location), [mapVendors]);
 
-  const mapCaption =
-    vendors.length > 0
-      ? `${vendors.length} match${vendors.length === 1 ? "" : "es"} · OpenStreetMap`
-      : nearbyVendors.length > 0
-        ? `${nearbyVendors.length} nearby · search to narrow`
-        : "You · enable location";
+  const onVendorSelect = useCallback((v: Vendor) => {
+    setSelectedVendor(v);
+    setHoveredVendor(v.vendorId);
+  }, []);
 
   useEffect(() => {
     getCurrentLocation()
@@ -108,252 +108,216 @@ export default function SearchPage() {
     handleVoice(queryInput);
   }
 
+  const mapHeightStyle = { height: "calc(100dvh - 48px - env(safe-area-inset-bottom,0px))" };
+
   return (
-    <main className="mx-auto flex min-h-[100dvh] w-full max-w-[430px] flex-col bg-[var(--infra-black)] text-[var(--infra-ink)]">
-      {/* Global nav — matches reference */}
-      <header className="sticky top-0 z-[90] flex h-11 items-center justify-between bg-[var(--infra-black)] px-5">
-        <span className="text-[17px] font-semibold tracking-[-0.5px] text-[var(--infra-ink)]">
-          InfraStreet
-          <sup className="ml-0.5 align-super text-[9px] font-semibold text-[var(--infra-accent)]">BETA</sup>
-        </span>
-        <div className="flex items-center gap-1.5">
-          <Link
-            href="/deals"
-            className="flex h-[30px] items-center gap-1.5 rounded-[var(--r-sm)] bg-[var(--infra-tile-2)] px-3 text-[13px] text-[var(--infra-ink)] active:opacity-80"
-          >
-            Deals
-          </Link>
-          <Link
-            href="/orders"
-            className="flex h-[30px] items-center gap-1.5 rounded-[var(--r-sm)] bg-[var(--infra-tile-2)] px-3 text-[13px] text-[var(--infra-ink)] active:opacity-80"
-          >
-            Orders
-          </Link>
-        </div>
-      </header>
-
-      {/* Sub nav */}
-      <div
-        className="sticky top-11 z-[89] flex h-[52px] items-center justify-between border-b border-[var(--infra-ink-4)] bg-[rgba(0,0,0,0.88)] px-5 backdrop-blur-xl backdrop-saturate-180"
-        style={{ WebkitBackdropFilter: "saturate(180%) blur(20px)" }}
-      >
-        <Link
-          href="/"
-          className="text-[15px] font-semibold tracking-[-0.3px] text-[var(--infra-ink-2)] hover:text-[var(--infra-ink)]"
+    <MobileAppFrame>
+      <div className="page-enter relative min-h-[100dvh] bg-[var(--is-bg)]">
+        <header
+          className="z-[1000] flex h-12 items-center justify-between border-b-[0.5px] border-[var(--is-border-1)] bg-[var(--is-bg)] px-4"
+          style={{ paddingTop: "max(0px, env(safe-area-inset-top))" }}
         >
-          ← Back
-        </Link>
-        <span className="text-[15px] font-semibold tracking-[-0.3px]">Find food</span>
-        <span className="w-10" aria-hidden />
-      </div>
+          <Link
+            href="/"
+            className="flex min-h-[44px] min-w-[44px] items-center text-[13px] font-medium text-[var(--is-blue)]"
+          >
+            ‹ Back
+          </Link>
+          <span className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--is-text-1)]">Map</span>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/deals"
+              className="flex min-h-[40px] items-center rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-3 text-[12px] font-medium text-[var(--is-text-2)]"
+            >
+              Deals
+            </Link>
+            <Link
+              href="/orders"
+              className="flex min-h-[40px] items-center rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-3 text-[12px] font-medium text-[var(--is-text-2)]"
+            >
+              Orders
+            </Link>
+          </div>
+        </header>
 
-      {location && (
-        <div className="border-b border-[var(--infra-ink-4)] bg-[var(--infra-black)] px-4 pb-3 pt-3">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--infra-accent)]">
-            Map · live pins
-          </p>
-          <p className="mb-2 text-[12px] leading-snug text-[var(--infra-ink-3)]">{mapCaption}</p>
-          <OsmMapView
-            userLocation={location}
-            vendors={mapPins}
-            highlightedVendorId={hoveredVendor}
-            className="h-[min(240px,42vw)] min-h-[200px]"
-          />
-        </div>
-      )}
-
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="px-5 pb-40 pt-5">
-          {transcript && (
-            <div className="mb-5 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <div className="inline-block rounded-[var(--r-lg)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-1)] px-4 py-3">
-                <p className="text-[14px] text-[var(--infra-ink-2)]">
-                  <span className="mr-2 font-medium text-[var(--infra-ink)]">Searching:</span>&quot;{transcript}&quot;
-                </p>
-              </div>
-            </div>
+        <div className="relative w-full" style={mapHeightStyle}>
+          {location && (
+            <OsmMapView
+              userLocation={location}
+              vendors={mapPins}
+              highlightedVendorId={hoveredVendor ?? selectedVendor?.vendorId ?? null}
+              onVendorSelect={onVendorSelect}
+              className="absolute inset-0 z-0 !min-h-0 rounded-none border-0"
+            />
           )}
 
-          {loading && (
-            <div className="flex flex-col items-center justify-center py-20">
-              <div className="relative">
-                <div className="h-16 w-16 rounded-full border-2 border-[var(--infra-ink-4)]" />
-                <div
-                  className="absolute inset-0 h-16 w-16 animate-spin rounded-full border-2 border-transparent"
-                  style={{ borderTopColor: accent }}
-                />
-              </div>
-              <p className="mt-6 text-[15px] text-[var(--infra-ink-3)]">Finding the best spots...</p>
-            </div>
-          )}
-
-          {message && !loading && vendors.length === 0 && (
-            <div className="py-8 text-center">
-              <p className="text-[var(--infra-ink-2)]">{message}</p>
-            </div>
-          )}
-
-          {vendors.length === 0 && !loading && !message && (
-            <div className="py-12 text-center">
-              <div className="mb-6 text-6xl leading-none" aria-hidden>
-                🌮
-              </div>
-              <p className="mb-2 text-[13px] font-semibold uppercase tracking-[0.06em] text-[var(--infra-accent)]">
-                Nearby first
-              </p>
-              <h2
-                className="mb-3 font-semibold text-[var(--infra-ink)]"
-                style={{ fontSize: "clamp(28px, 7vw, 34px)", letterSpacing: "-0.6px", lineHeight: 1.08 }}
-              >
-                What are you craving?
-              </h2>
-              <p className="mx-auto max-w-[300px] text-[17px] leading-snug text-[var(--infra-ink-2)]">
-                OpenStreetMap shows real stall locations. Type, tap below, or use the mic.
-              </p>
-              <div className="mt-8 flex flex-wrap justify-center gap-2">
-                {QUICK_FOOD_PICKS.map((food) => (
-                  <button
-                    key={food}
-                    type="button"
-                    disabled={!location || loading}
-                    onClick={() => handleVoice(food)}
-                    className="rounded-[var(--r-pill)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-2)] px-4 py-2 text-[15px] font-medium text-[var(--infra-ink)] transition-colors active:scale-[0.98] disabled:opacity-40"
-                  >
-                    {food}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {vendors.length > 0 && !loading && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-[var(--infra-ink-3)]">
-                  {vendors.length} {vendors.length === 1 ? "result" : "results"}
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setVendors([]);
-                    setTranscript("");
-                    setMessage("");
-                    setQueryInput("");
-                  }}
-                  className="text-[14px] text-[var(--infra-blue)] active:opacity-70"
-                >
-                  Clear
-                </button>
-              </div>
-
-              {refineChips.length > 0 && (
-                <div className="mb-4">
-                  <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-[var(--infra-ink-3)]">
-                    Also try
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {refineChips.map((label) => (
-                      <button
-                        key={label}
-                        type="button"
-                        disabled={loading}
-                        onClick={() => handleVoice(label)}
-                        className="rounded-[var(--r-pill)] border border-[var(--infra-ink-4)] bg-[var(--infra-accent-2)] px-3 py-1.5 text-[14px] font-medium text-[var(--infra-accent)] active:scale-[0.98] disabled:opacity-40"
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-3">
-                {vendors.map((v, index) => (
-                  <Link
-                    key={v.vendorId}
-                    href={`/vendor/${v.vendorId}`}
-                    className="block animate-in fade-in slide-in-from-bottom-2 duration-300 active:scale-[0.98]"
-                    style={{ animationDelay: `${index * 50}ms` }}
-                    onPointerEnter={() => setHoveredVendor(v.vendorId)}
-                    onPointerLeave={() => setHoveredVendor(null)}
-                  >
-                    <div
-                      className={`relative overflow-hidden rounded-[var(--r-xl)] border bg-[var(--infra-tile-1)] p-5 transition-colors ${
-                        hoveredVendor === v.vendorId
-                          ? "border-[var(--infra-accent)] ring-2 ring-[var(--infra-accent)]/25"
-                          : "border-[var(--infra-ink-4)]"
-                      }`}
-                    >
-                      {v.distance_m != null && (
-                        <div className="absolute right-4 top-4 rounded-[var(--r-pill)] bg-[rgba(0,0,0,0.72)] px-3 py-1 backdrop-blur-md">
-                          <span className="text-[12px] text-[var(--infra-ink)]">
-                            {v.distance_m < 1000 ? `${v.distance_m}m` : `${(v.distance_m / 1000).toFixed(1)}km`}
-                          </span>
-                        </div>
-                      )}
-                      <div className="pr-16">
-                        <h3 className="text-[19px] font-semibold tracking-[-0.4px] text-[var(--infra-ink)]">{v.name}</h3>
-                        {v.businessHours && (
-                          <p className="mt-1 text-[14px] text-[var(--infra-ink-3)]">{v.businessHours}</p>
-                        )}
-                      </div>
-                      {v.matchingItems && v.matchingItems.length > 0 && (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {v.matchingItems.slice(0, 3).map((item, i) => (
-                            <div
-                              key={i}
-                              className="flex items-center gap-2 rounded-[var(--r-md)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-2)] px-3 py-1.5"
-                            >
-                              <span className="text-[14px] text-[var(--infra-ink)]">{item.name}</span>
-                              <span className="text-[12px] text-[var(--infra-green)]">${item.price.toFixed(2)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <div className="absolute bottom-5 right-5 flex h-9 w-9 items-center justify-center rounded-full bg-[var(--infra-tile-2)] text-[var(--infra-ink-3)]">
-                        →
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Sticky search bar */}
-      <div
-        className="pointer-events-none fixed bottom-0 left-0 right-0 z-50 border-t border-[var(--infra-ink-4)] bg-[rgba(0,0,0,0.88)] px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl backdrop-saturate-180"
-        style={{ WebkitBackdropFilter: "saturate(180%) blur(20px)" }}
-      >
-        <form
-          onSubmit={onSearchSubmit}
-          className="pointer-events-auto mx-auto flex max-w-[430px] items-center gap-2"
-        >
-          <div className="flex min-w-0 flex-1 items-center rounded-[var(--r-pill)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-2)] px-4">
+          <form
+            onSubmit={onSearchSubmit}
+            className="absolute top-[60px] right-4 left-4 z-[1000] flex items-center gap-2 rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-4 py-3"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0 text-[var(--is-text-4)]" aria-hidden>
+              <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M20 20l-4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
             <input
               type="search"
               enterKeyHint="search"
               autoComplete="off"
-              placeholder={location ? "Tacos, coffee…" : "Enable location"}
+              placeholder="Search stalls…"
               disabled={!location || loading}
               value={queryInput}
               onChange={(e) => setQueryInput(e.target.value)}
-              className="min-w-0 flex-1 bg-transparent py-3 text-[16px] text-[var(--infra-ink)] placeholder:text-[var(--infra-ink-3)] outline-none"
+              className="min-h-[44px] min-w-0 flex-1 bg-transparent text-[15px] text-[var(--is-text-1)] placeholder:text-[var(--is-text-4)] outline-none"
             />
+            <VoiceDial onTranscript={handleVoice} disabled={!location || loading} variant="dark" />
+          </form>
+
+          <div className="absolute top-[120px] right-0 left-0 z-[999] flex gap-2 overflow-x-auto px-4 pb-2 pt-0 [scrollbar-width:none]">
+            {QUICK_FOOD_PICKS.map((food) => (
+              <button
+                key={food}
+                type="button"
+                disabled={!location || loading}
+                onClick={() => {
+                  setActiveFilter(food);
+                  handleVoice(food);
+                }}
+                className={`shrink-0 rounded-[20px] border-[0.5px] px-[14px] py-1.5 text-[13px] font-medium whitespace-nowrap ${
+                  activeFilter === food
+                    ? "border-[var(--is-purple)] bg-[var(--is-purple-tint)] text-[var(--is-purple)]"
+                    : "border-[var(--is-border-1)] bg-[var(--is-surface)] text-[var(--is-text-3)]"
+                }`}
+              >
+                {food}
+              </button>
+            ))}
           </div>
-          <button
-            type="submit"
-            disabled={!location || loading || !queryInput.trim()}
-            className="h-11 shrink-0 rounded-[var(--r-pill)] px-5 text-[16px] font-normal text-white disabled:opacity-40 active:scale-[0.96]"
-            style={{ backgroundColor: accent }}
+
+          {loading && (
+            <div className="absolute right-4 bottom-24 left-4 z-[998] rounded-[16px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] p-4">
+              <div className="skeleton mb-3 h-4 w-3/4" />
+              <div className="skeleton h-4 w-1/2" />
+            </div>
+          )}
+
+          {message && !loading && vendors.length === 0 && (
+            <div className="absolute bottom-24 left-4 z-[998] max-w-[calc(100%-32px)]">
+              <DataCard>
+                <p className="text-[13px] text-[var(--is-text-2)]">{message}</p>
+                <PillButton type="button" variant="ghost" className="mt-3" onClick={() => setMessage("")}>
+                  Dismiss
+                </PillButton>
+              </DataCard>
+            </div>
+          )}
+        </div>
+
+        {selectedVendor && (
+          <div
+            className="fixed right-0 bottom-0 left-0 z-[1001] mx-auto max-w-[430px] rounded-t-[24px] border-t-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-5 pt-3"
+            style={{ paddingBottom: "calc(20px + env(safe-area-inset-bottom))", height: "45vh" }}
           >
-            Go
-          </button>
-          <VoiceDial onTranscript={handleVoice} disabled={!location || loading} variant="dark" />
-        </form>
+            <div className="skeleton mx-auto mb-4 h-1 w-9 rounded-full bg-[var(--is-border-1)]" />
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-[17px] font-semibold tracking-[-0.02em] text-[var(--is-text-1)]">
+                  {selectedVendor.name}
+                </h2>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <StatusPill kind="ready">Open</StatusPill>
+                  {selectedVendor.distance_m != null && (
+                    <span className="text-[13px] text-[var(--is-text-3)] [font-variant-numeric:tabular-nums]">
+                      {selectedVendor.distance_m < 1000
+                        ? `${selectedVendor.distance_m}m`
+                        : `${(selectedVendor.distance_m / 1000).toFixed(1)}km`}{" "}
+                      away
+                    </span>
+                  )}
+                </div>
+                {selectedVendor.businessHours && (
+                  <p className="mt-2 text-[12px] text-[var(--is-text-3)]">{selectedVendor.businessHours}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                aria-label="Close sheet"
+                className="flex size-11 items-center justify-center text-[var(--is-text-4)]"
+                onClick={() => setSelectedVendor(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="mt-4 max-h-[30%] overflow-y-auto">
+              {selectedVendor.matchingItems?.slice(0, 4).map((item, i) => (
+                <div key={i} className="flex justify-between border-b-[0.5px] border-[var(--is-border-2)] py-2 text-[13px]">
+                  <span className="text-[var(--is-text-2)]">{item.name}</span>
+                  <span className="[font-variant-numeric:tabular-nums] text-[var(--is-text-1)]">${item.price.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4">
+              <PillLink href={`/vendor/${selectedVendor.vendorId}`}>See menu</PillLink>
+            </div>
+          </div>
+        )}
+
+        {!selectedVendor && vendors.length > 0 && !loading && (
+          <div
+            className="fixed right-0 bottom-0 left-0 z-[1000] mx-auto max-h-[40vh] max-w-[430px] overflow-y-auto border-t-[0.5px] border-[var(--is-border-1)] bg-[var(--is-bg)] px-4 py-4"
+            style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+          >
+            <div className="item-stagger mb-3 flex items-center justify-between">
+              <span className="text-[11px] font-semibold tracking-[0.08em] text-[var(--is-text-4)] uppercase">
+                {vendors.length} results
+              </span>
+              <button
+                type="button"
+                className="text-[13px] font-medium text-[var(--is-blue)]"
+                onClick={() => {
+                  setVendors([]);
+                  setTranscript("");
+                  setMessage("");
+                  setQueryInput("");
+                }}
+              >
+                Clear
+              </button>
+            </div>
+            {refineChips.length > 0 && (
+              <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+                {refineChips.map((label) => (
+                  <button
+                    key={label}
+                    type="button"
+                    disabled={loading}
+                    onClick={() => handleVoice(label)}
+                    className="shrink-0 rounded-[20px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-card)] px-3 py-1.5 text-[12px] text-[var(--is-text-2)]"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="item-stagger space-y-2">
+              {vendors.map((v) => (
+                <button
+                  key={v.vendorId}
+                  type="button"
+                  onClick={() => onVendorSelect(v)}
+                  className="flex w-full min-h-[44px] items-center justify-between rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-4 py-3 text-left"
+                >
+                  <span className="text-[15px] font-medium text-[var(--is-text-1)]">{v.name}</span>
+                  <span className="text-[12px] text-[var(--is-text-4)]">→</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {transcript && vendors.length === 0 && !loading && (
+          <p className="px-4 py-2 text-center text-[12px] text-[var(--is-text-3)]">Searching: &quot;{transcript}&quot;</p>
+        )}
       </div>
-    </main>
+    </MobileAppFrame>
   );
 }

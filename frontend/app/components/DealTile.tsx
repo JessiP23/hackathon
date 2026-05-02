@@ -1,13 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { motion, useMotionValue, animate } from "framer-motion";
+import { motion, useMotionValue, animate, useTransform } from "framer-motion";
 import { Deal } from "../shared/types";
-
-const ACCENT = "#ff3b30";
-const INK = "#1D1D1F";
-const CANVAS = "#FFFFFF";
-const PARCHMENT = "#F5F5F7";
+import { StatusPill, PillButton } from "./Precision";
 
 interface Props {
   deal: Deal;
@@ -17,40 +13,37 @@ interface Props {
   isTop: boolean;
 }
 
-function formatEndTime(iso: string) {
-  try {
-    return new Date(iso).toLocaleTimeString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
+function formatRemaining(expiresAt: string) {
+  const diff = new Date(expiresAt).getTime() - Date.now();
+  if (diff <= 0) return "0:00";
+  const m = Math.floor(diff / 60000);
+  const s = Math.floor((diff % 60000) / 1000);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function vendorInitials(name: string | undefined) {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
 }
 
 export default function DealTile({ deal, stackIndex, onReserve, onSwipeNext, isTop }: Props) {
+  const x = useMotionValue(0);
   const y = useMotionValue(0);
   const lastTap = useRef<number>(0);
 
-  const walkMins = Math.max(
-    1,
-    Math.round(
-      ((deal.distanceMiles ?? (deal.distance_m ? deal.distance_m / 1609.34 : 0.5)) as number) * 18,
-    ),
-  );
+  const walkM =
+    deal.distance_m != null
+      ? deal.distance_m
+      : Math.round(((deal.distanceMiles ?? 0.5) as number) * 1609.34);
 
   const expiresAt = deal.expiresAt;
-  const [ringProgress, setRingProgress] = useState(1);
+  const [rem, setRem] = useState(() => (expiresAt ? formatRemaining(expiresAt) : ""));
 
   useEffect(() => {
     if (!expiresAt) return;
-    const end = new Date(expiresAt).getTime();
-    const start = end - 45 * 60 * 1000;
-    const total = Math.max(60000, end - start);
-    const tick = () => {
-      const now = Date.now();
-      setRingProgress(Math.max(0, Math.min(1, (end - now) / total)));
-    };
+    const tick = () => setRem(formatRemaining(expiresAt));
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
@@ -82,39 +75,65 @@ export default function DealTile({ deal, stackIndex, onReserve, onSwipeNext, isT
     }
   };
 
-  const onDragEnd = (_: unknown, info: { offset: { y: number }; velocity: { y: number } }) => {
+  const onDragEnd = (_unknown: unknown, info: { offset: { x: number; y: number }; velocity: { x: number; y: number } }) => {
     if (!isTop) return;
+    const ox = info.offset.x;
     const oy = info.offset.y;
-    if (oy < -80 || info.velocity.y < -400) {
-      animate(y, -900, { type: "spring", stiffness: 300, damping: 30 }).then(() => {
+    const vx = info.velocity.x;
+    const vy = info.velocity.y;
+
+    if (ox > 80 && Math.abs(ox) >= Math.abs(oy)) {
+      vibrate(12);
+      try {
+        localStorage.setItem(`saved_deal_${deal.dealId}`, "1");
+      } catch {
+        /* ignore */
+      }
+      animate(x, 0, { type: "tween", duration: 0.28, ease: [0.4, 0, 0.2, 1] });
+      animate(y, 0, { type: "tween", duration: 0.28, ease: [0.4, 0, 0.2, 1] });
+      return;
+    }
+
+    if (oy < -80 || vy < -400) {
+      animate(y, -900, { type: "tween", duration: 0.28, ease: [0.4, 0, 0.2, 1] }).then(() => {
         y.set(0);
+        x.set(0);
         onSwipeNext();
       });
-    } else {
-      animate(y, 0, { type: "spring", stiffness: 300, damping: 30 });
+      return;
     }
+
+    animate(x, 0, { type: "tween", duration: 0.28, ease: [0.4, 0, 0.2, 1] });
+    animate(y, 0, { type: "tween", duration: 0.28, ease: [0.4, 0, 0.2, 1] });
   };
 
   const z = 30 - stackIndex;
   const scale = 1 - stackIndex * 0.03;
+  const rot = useTransform(x, [-200, 200], [-6, 6]);
+
+  const price = deal.dealPrice?.toFixed(0) ?? "—";
 
   return (
     <motion.div
-      className="absolute inset-0 overflow-hidden"
+      className="absolute inset-0 flex flex-col justify-end overflow-hidden bg-[var(--is-bg)]"
       style={{
         zIndex: z,
-        color: INK,
-        background: CANVAS,
+        x: isTop ? x : 0,
         y: isTop ? y : 0,
         scale,
+        rotate: isTop ? rot : 0,
         opacity: stackIndex > 2 ? 0 : 1,
       }}
-      drag={isTop ? "y" : false}
-      dragElastic={0.15}
-      dragConstraints={{ top: 0, bottom: 0 }}
+      drag={isTop}
+      dragConstraints={{ top: 0, right: 200, bottom: 40, left: -200 }}
+      dragElastic={0.12}
       onDragEnd={onDragEnd}
+      transition={{ type: "tween", duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
     >
-      <div className="relative h-full w-full bg-black">
+      <div
+        className="relative shrink-0 overflow-hidden rounded-b-[24px] bg-[var(--is-surface)]"
+        style={{ height: "55vh" }}
+      >
         {deal.mediaUrl ? (
           deal.mediaUrl.match(/\.(mp4|webm|mov)$/i) ? (
             <video
@@ -123,95 +142,67 @@ export default function DealTile({ deal, stackIndex, onReserve, onSwipeNext, isT
               muted
               loop
               playsInline
-              className="h-full w-full object-cover"
+              className="size-full object-cover"
               onClick={handleTapMedia}
             />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={deal.mediaUrl}
-              alt={deal.itemName}
-              className="h-full w-full object-cover"
+              alt={deal.itemName || "Deal"}
+              className="size-full object-cover"
               onClick={handleTapMedia}
             />
           )
         ) : (
-          <div className="h-full w-full animate-pulse bg-gradient-to-br from-neutral-800 via-neutral-700 to-neutral-900" />
-        )}
-
-        <div
-          className="absolute bottom-0 left-0 right-0 flex flex-col border-t border-black/[0.04] px-6 pb-10 pt-5"
-          style={{
-            height: "28vh",
-            minHeight: 200,
-            background: "rgba(245,245,247,0.82)",
-            backdropFilter: "blur(20px)",
-            WebkitBackdropFilter: "blur(20px)",
-          }}
-        >
-          <div className="flex items-center gap-2 mb-1 min-h-0">
-            <div
-              className="h-8 w-8 shrink-0 rounded-full bg-neutral-300 bg-cover bg-center border border-black/5"
-              style={{
-                backgroundImage:
-                  deal.mediaUrl && !deal.mediaUrl.match(/\.(mp4|webm)$/i)
-                    ? `url(${deal.mediaUrl})`
-                    : undefined,
-              }}
-            />
-            <span className="text-[17px] font-semibold tracking-tight text-[#1D1D1F] truncate">
-              {deal.vendorName}
-            </span>
-            <span className="text-[15px] text-neutral-500 font-normal whitespace-nowrap">
-              · {walkMins}min walk
-            </span>
-          </div>
-
-          <h2
-            className="font-bold tracking-tight text-[#1D1D1F] mt-1 line-clamp-2"
-            style={{ fontSize: "clamp(28px, 8vw, 56px)", letterSpacing: "-0.6px", lineHeight: 1.05 }}
+          <div
+            className="flex size-full items-center justify-center bg-[var(--is-card)] text-[48px] font-semibold text-[var(--is-text-4)]"
+            onClick={handleTapMedia}
+            role="presentation"
           >
+            {vendorInitials(deal.vendorName)}
+          </div>
+        )}
+      </div>
+
+      <div
+        className="relative px-5 pt-5"
+        style={{ paddingBottom: "calc(80px + env(safe-area-inset-bottom))" }}
+      >
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <StatusPill kind="flash">Flash</StatusPill>
+          <span className="text-[13px] font-[family-name:var(--is-mono)] text-[var(--is-red)] [font-variant-numeric:tabular-nums]">
+            {rem} left
+          </span>
+        </div>
+
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <h2 className="max-w-[70%] text-[24px] font-bold leading-[1.15] tracking-[-0.03em] text-[var(--is-text-1)]">
             {deal.itemName}
           </h2>
+          <span className="text-[28px] font-bold tracking-[-0.03em] text-[var(--is-text-1)] [font-variant-numeric:tabular-nums]">
+            ${price}
+          </span>
+        </div>
 
-          <div className="flex items-center gap-3 mt-2 flex-wrap">
-            <span className="text-[28px] font-semibold tracking-tight">
-              ${deal.dealPrice?.toFixed(2) ?? "—"}
-            </span>
-            <span className="text-[15px] text-neutral-500">
-              {deal.remainingQuantity ?? "—"} left
-            </span>
-            <div className="ml-auto relative h-11 w-11 shrink-0">
-              <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
-                <circle cx="18" cy="18" r="15" fill="none" stroke={PARCHMENT} strokeWidth="3" />
-                <circle
-                  cx="18"
-                  cy="18"
-                  r="15"
-                  fill="none"
-                  stroke={ACCENT}
-                  strokeWidth="2"
-                  strokeDasharray={`${ringProgress * 94.2} 94.2`}
-                  strokeLinecap="round"
-                />
-              </svg>
-              <span className="absolute inset-0 flex items-center justify-center text-[11px] font-semibold text-neutral-700">
-                {expiresAt ? formatEndTime(expiresAt) : ""}
-              </span>
-            </div>
-          </div>
+        <p className="text-[15px] tracking-[-0.01em] text-[var(--is-text-2)]">
+          {deal.vendorName ?? "Vendor"} ·{" "}
+          <span className="[font-variant-numeric:tabular-nums]">{walkM < 1000 ? `${walkM}m` : `${(walkM / 1000).toFixed(1)}km`}</span>{" "}
+          away
+        </p>
 
-          <button
+        <div className="mt-3">
+          <PillButton
+            variant="danger"
+            className="mt-3"
             type="button"
-            className="mt-3 h-14 w-full rounded-full font-semibold text-[17px] text-white shadow-lg active:scale-[0.98] transition-transform"
-            style={{ backgroundColor: ACCENT }}
             onClick={() => {
               vibrate(20);
               onReserve(deal);
             }}
           >
-            Reserve for ${deal.dealPrice?.toFixed(2) ?? "—"}
-          </button>
+            Reserve now — ${price}
+          </PillButton>
         </div>
       </div>
     </motion.div>

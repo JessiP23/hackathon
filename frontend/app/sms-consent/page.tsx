@@ -49,7 +49,7 @@ export default function SmsConsentPage() {
             <li>
               <strong className="text-[var(--infra-ink)]">Customers:</strong> When you enter
               your phone number during onboarding at{" "}
-              <Link href="/customer-onboarding" className="text-[var(--infra-blue)] underline underline-offset-2">
+              <Link href="/onboard" className="text-[var(--infra-blue)] underline underline-offset-2">
                 Get Started
               </Link>
               , you must check the box confirming that you agree to receive SMS

@@ -6,7 +6,7 @@ import type { Location, Vendor } from "@/app/shared/types";
 const OsmMapInner = dynamic(() => import("./OsmMapInner"), {
   ssr: false,
   loading: () => (
-    <div className="min-h-[12rem] w-full animate-pulse rounded-[22px] bg-[var(--infra-tile-1,#1c1c1e)] border border-white/[0.08]" />
+    <div className="skeleton min-h-[12rem] w-full rounded-[16px] border-[0.5px] border-[var(--is-border-1)]" />
   ),
 });
 
@@ -14,6 +14,7 @@ type Props = {
   userLocation: Location | null;
   vendors: Vendor[];
   highlightedVendorId: string | null;
+  onVendorSelect?: (v: Vendor) => void;
   className?: string;
 };
 

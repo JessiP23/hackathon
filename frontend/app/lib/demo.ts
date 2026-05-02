@@ -1,4 +1,4 @@
-/** YC / investor demo: browse deals & map without signing in. Ordering still needs /customer-onboarding. */
+/** YC / investor demo: browse deals & map without signing in. Ordering uses /onboard. */
 
 export const DEMO_BROWSE_KEY = "infrastreet_demo";
 

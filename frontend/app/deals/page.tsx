@@ -9,6 +9,7 @@ import { Deal, Location } from "@/app/shared/types";
 import DealTile from "@/app/components/DealTile";
 import { MobileAppFrame } from "@/app/components/MobileLayout";
 import { isDemoBrowse } from "@/app/lib/demo";
+import { DataCard, PillLink, PillButton } from "@/app/components/Precision";
 
 export default function DealsPage() {
   const router = useRouter();
@@ -51,17 +52,25 @@ export default function DealsPage() {
       const phone = localStorage.getItem("infrastreet_phone");
       if (!phone) {
         if (isDemoBrowse()) {
-          alert("Demo: tap Get started to add your number, then you can reserve and pay.");
+          alert("Demo: complete Get started to add your number, then you can reserve and pay.");
           return;
         }
-        router.push("/customer-onboarding");
+        router.push("/onboard");
         return;
       }
       setOrdering(deal.dealId);
       try {
         const order = await placeDealOrder(deal.dealId, { customerPhone: phone, quantity: 1 });
         if (order.checkoutUrl) {
-          window.location.href = order.checkoutUrl;
+          try {
+            sessionStorage.setItem(
+              "infrastreet_checkout",
+              JSON.stringify({ orderId: order.orderId, url: order.checkoutUrl }),
+            );
+          } catch {
+            /* ignore */
+          }
+          router.push(`/checkout?orderId=${encodeURIComponent(order.orderId)}`);
         } else {
           router.push(`/orders/${order.orderId}/confirmed`);
         }
@@ -148,93 +157,111 @@ export default function DealsPage() {
 
   const stackSlice = sortedDeals.slice(stackIndex, stackIndex + 3);
 
+  function DealSkeleton({ i }: { i: number }) {
+    return (
+      <div
+        className="absolute inset-0 flex flex-col justify-end bg-[var(--is-bg)]"
+        style={{ zIndex: 20 - i, transform: `scale(${1 - i * 0.03})` }}
+      >
+        <div className="skeleton mb-auto h-[55vh] w-full rounded-b-[24px]" />
+        <div className="px-5 pb-20">
+          <div className="skeleton mb-3 h-4 w-24" />
+          <div className="skeleton mb-2 h-8 w-full" />
+          <div className="skeleton h-4 w-2/3" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <MobileAppFrame>
-      <main className="relative flex min-h-[100dvh] flex-col overflow-hidden bg-[var(--infra-black)] text-[var(--infra-ink)]">
-        <header className="pointer-events-none absolute left-0 right-0 top-0 z-40 flex flex-col px-0 [padding-top:max(12px,env(safe-area-inset-top))]">
+      <main className="page-enter relative flex min-h-[100dvh] flex-col overflow-hidden bg-[var(--is-bg)] text-[var(--is-text-1)]">
+        <header className="pointer-events-none absolute top-0 right-0 left-0 z-40 flex flex-col [padding-top:max(12px,env(safe-area-inset-top))]">
           {showDemoBanner && (
-              <div className="pointer-events-auto mb-1 w-full px-4 py-2 text-center">
-                <Link
-                  href="/customer-onboarding"
-                  className="inline-block rounded-lg bg-[var(--infra-tile-2)]/95 px-3 py-1.5 text-[12px] font-medium text-[var(--infra-ink)] ring-1 ring-[var(--infra-ink-4)]"
-                >
-                  Demo browse — Get started to reserve
-                </Link>
-              </div>
-            )}
+            <div className="pointer-events-auto mb-1 w-full px-4 py-2 text-center">
+              <Link
+                href="/onboard"
+                className="inline-block rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-3 py-2 text-[12px] font-medium text-[var(--is-text-1)]"
+              >
+                Demo browse — Get started to reserve
+              </Link>
+            </div>
+          )}
           <div className="flex w-full items-center justify-between px-5 py-2">
-          <Link href="/search" className="pointer-events-auto text-[14px] font-medium text-[var(--infra-ink-2)] active:text-[var(--infra-ink)]">
-            ← Search
-          </Link>
-          <span className="pointer-events-none text-center text-[14px] font-semibold tracking-tight text-[var(--infra-ink)]">
-            Deals
-          </span>
-          <Link href="/orders" className="pointer-events-auto text-[14px] font-medium text-[var(--infra-blue)]">
-            Orders
-          </Link>
+            <Link
+              href="/search"
+              className="pointer-events-auto flex min-h-[44px] items-center text-[13px] font-medium text-[var(--is-blue)]"
+            >
+              ‹ Search
+            </Link>
+            <span className="pointer-events-none text-center text-[15px] font-semibold tracking-[-0.01em] text-[var(--is-text-1)]">
+              Deals
+            </span>
+            <Link
+              href="/orders"
+              className="pointer-events-auto flex min-h-[44px] items-center text-[13px] font-medium text-[var(--is-blue)]"
+            >
+              Orders
+            </Link>
           </div>
         </header>
 
-      {loading && (
-        <div className="flex flex-1 items-center justify-center">
-          <div
-            className="aspect-[3/4] w-[min(100vw,420px)] animate-pulse rounded-2xl bg-[var(--infra-tile-1)]"
-            aria-hidden
-          />
-        </div>
-      )}
-
-      {!loading && sortedDeals.length === 0 && (
-        <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6 text-center">
-          <div className="absolute inset-0 bg-[var(--infra-black)]" />
-          <div className="absolute inset-0 bg-gradient-to-b from-[var(--infra-tile-1)]/80 via-transparent to-[var(--infra-black)]" />
-
-          <div className="relative z-10 max-w-md">
-            <h1
-              className="mb-3 font-semibold tracking-tight text-[var(--infra-ink)]"
-              style={{ fontSize: "clamp(28px, 7vw, 34px)", letterSpacing: "-0.4px" }}
-            >
-              The street is quiet... for now.
-            </h1>
-            <p className="mb-8 text-[17px] leading-snug text-[var(--infra-ink-2)]">
-              We&apos;ll text you when deals heat up nearby.
-            </p>
-            <button
-              type="button"
-              disabled={notifyBusy}
-              onClick={onNotifyMe}
-              className="mx-auto flex h-14 w-full max-w-xs items-center justify-center rounded-[var(--r-pill)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-2)] text-[17px] font-semibold text-[var(--infra-ink)] disabled:opacity-50 active:scale-[0.98]"
-            >
-              {notifyBusy ? "Saving…" : "Notify me"}
-            </button>
-            {notifyMsg && <p className="mt-4 text-[14px] text-[var(--infra-ink-2)]">{notifyMsg}</p>}
+        {loading && (
+          <div className="relative flex-1">
+            <DealSkeleton i={0} />
+            <DealSkeleton i={1} />
+            <DealSkeleton i={2} />
           </div>
-        </div>
-      )}
+        )}
 
-      {!loading && sortedDeals.length > 0 && (
-        <div className="relative h-[100dvh] flex-1">
-          {ordering && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40">
-              <span className="text-[14px] font-medium text-[var(--infra-ink)]">Redirecting to checkout…</span>
-            </div>
-          )}
-          {stackSlice.map((deal, i) => (
-            <DealTile
-              key={`${deal.dealId}-${stackIndex + i}`}
-              deal={deal}
-              stackIndex={i}
-              isTop={i === 0}
-              onReserve={handleReserve}
-              onSwipeNext={onSwipeNext}
-            />
-          ))}
-          <p className="pointer-events-none absolute bottom-8 left-0 right-0 z-40 text-center text-[11px] text-[var(--infra-ink-3)] [padding-bottom:env(safe-area-inset-bottom)]">
-            Swipe up for next deal
-          </p>
-        </div>
-      )}
-    </main>
+        {!loading && sortedDeals.length === 0 && (
+          <div className="relative flex flex-1 flex-col items-center justify-center px-6 py-24 text-center">
+            <DataCard className="max-w-sm">
+              <p className="text-[11px] font-semibold tracking-[0.08em] text-[var(--is-text-4)] uppercase">
+                All caught up
+              </p>
+              <h1 className="mt-2 text-[17px] font-semibold tracking-[-0.02em] text-[var(--is-text-1)]">
+                No more deals right now
+              </h1>
+              <p className="mt-2 text-[15px] text-[var(--is-text-2)]">New flash deals drop throughout the day.</p>
+              <div className="mt-6">
+                <PillLink href="/search" variant="ghost">
+                  Explore the map
+                </PillLink>
+              </div>
+              <div className="mt-6">
+                <PillButton type="button" variant="ghost" disabled={notifyBusy} onClick={() => void onNotifyMe()}>
+                  {notifyBusy ? "Saving…" : "Notify me"}
+                </PillButton>
+                {notifyMsg && <p className="mt-3 text-[13px] text-[var(--is-text-2)]">{notifyMsg}</p>}
+              </div>
+            </DataCard>
+          </div>
+        )}
+
+        {!loading && sortedDeals.length > 0 && (
+          <div className="relative h-[100dvh] flex-1">
+            {ordering && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40">
+                <span className="text-[14px] font-medium text-[var(--is-text-1)]">Opening checkout…</span>
+              </div>
+            )}
+            {stackSlice.map((deal, i) => (
+              <DealTile
+                key={`${deal.dealId}-${stackIndex + i}`}
+                deal={deal}
+                stackIndex={i}
+                isTop={i === 0}
+                onReserve={handleReserve}
+                onSwipeNext={onSwipeNext}
+              />
+            ))}
+            <p className="pointer-events-none absolute right-0 bottom-8 left-0 z-40 text-center text-[11px] text-[var(--is-text-4)] [padding-bottom:env(safe-area-inset-bottom)]">
+              Swipe up next · Swipe right save
+            </p>
+          </div>
+        )}
+      </main>
     </MobileAppFrame>
   );
 }
