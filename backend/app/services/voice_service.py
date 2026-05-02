@@ -5,6 +5,12 @@ from typing import Optional
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://mcp-server:3001")
 
 
+def _mcp_http_url() -> str:
+    """LeanMCP serves JSON-RPC at .../mcp. Compose avoids /mcp/mcp when env already includes /mcp."""
+    base = (MCP_SERVER_URL or "").rstrip("/")
+    return base if base.endswith("/mcp") else f"{base}/mcp"
+
+
 class VoiceService:
     """Voice service that routes to MCP agents"""
 
@@ -38,7 +44,7 @@ class VoiceService:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 # LeanMCP exposes tools at POST /mcp with JSON-RPC format
                 response = await client.post(
-                    f"{MCP_SERVER_URL}/mcp",
+                    _mcp_http_url(),
                     json={
                         "jsonrpc": "2.0",
                         "method": "tools/call",

@@ -139,13 +139,17 @@ class AgentService:
         # Photo before we have a vendor record — menu step comes after name/location.
         if not vendor and image_bytes:
             return (
-                "Primero el nombre de tu negocio y ubicacion (texto o pin)."
+                "Primero mandanos el nombre de tu negocio (solo texto)."
                 if lang == "es"
-                else "First send your business name and location (text or location pin)."
+                else "First send your business name as text."
             )
 
-        # New vendor — continue or start SMS onboarding before a DB record exists.
+        # New vendor — one question per step before DB record exists.
         if not vendor:
+            if state and state.get("step") == "awaiting_business_name":
+                return await self._onboard_business_name_reply(phone, text_body, lang)
+            if state and state.get("step") == "awaiting_location":
+                return await self._onboard_location_text(phone, text_body, lang)
             if state and state.get("step") == "awaiting_name_only":
                 return await self._onboard_step_after_pin(phone, text_body, lang)
             if state and state.get("step") == "awaiting_name_location":
@@ -199,19 +203,95 @@ class AgentService:
         else:
             lang = self._detect_lang(text_body)
         self._set_lang(phone, lang)
-        self._set_state(phone, {"step": "awaiting_name_location"}, ttl=1800)
+        self._set_state(phone, {"step": "awaiting_business_name"}, ttl=1800)
         if lang == "es":
             return (
-                "Hola! Bienvenido a InfraStreet 🌮 ¿Como se llama tu negocio y donde estas? "
-                "En el teléfono: clip → Ubicación para un pin en el mapa. "
-                "Si no puedes, escribe una linea: Taqueria Maria, Brooklyn NY"
+                "Hola! Bienvenido a InfraStreet.\n"
+                "Paso 1 de 2: ¿como se llama tu negocio?\n"
+                "(Un solo mensaje, solo el nombre.)"
             )
         return (
-            "Hey! Welcome to InfraStreet 🌮 What's your business name and area? "
-            "On your phone: tap the paperclip, then Location, to send a map pin "
-            "(Desktop Telegram often can't send location—type one line instead, e.g. "
-            "Maria Tacos, Brooklyn NY)."
+            "Hey! Welcome to InfraStreet.\n"
+            "Step 1 of 2: What's your business name?\n"
+            "(One message — name only.)"
         )
+
+    async def _onboard_business_name_reply(self, phone: str, text_body: str, lang: str) -> str:
+        name = (text_body or "").strip()
+        if not name:
+            return "Necesito el nombre del negocio." if lang == "es" else "I need your business name."
+        state = self._get_state(phone) or {}
+        lat, lng = state.get("lat"), state.get("lng")
+        if lat is not None and lng is not None:
+            return await self._onboard_create_vendor_after_pin(
+                phone, name, float(lat), float(lng), lang
+            )
+        self._set_state(phone, {"step": "awaiting_location", "business_name": name}, ttl=1800)
+        if lang == "es":
+            return (
+                "Paso 2 de 2: ¿donde esta el puesto?\n"
+                "Manda clip → Ubicacion (Brooklyn, Queens o Manhattan) "
+                "o escribe el barrio, ej: Astoria, Queens."
+            )
+        return (
+            "Step 2 of 2: Where's your stall?\n"
+            "Send paperclip → Location (Brooklyn, Queens, or Manhattan) "
+            "OR type a neighborhood, e.g. Williamsburg, Brooklyn."
+        )
+
+    async def _onboard_location_text(self, phone: str, text_body: str, lang: str) -> str:
+        state = self._get_state(phone) or {}
+        name = (state.get("business_name") or "").strip()
+        if not name:
+            return (
+                "Empieza de nuevo con /start — primero el nombre del negocio."
+                if lang == "es"
+                else "Start again with /start — we need your business name first."
+            )
+        q = (text_body or "").strip()
+        if not q:
+            return (
+                "Escribe un barrio o direccion en NYC."
+                if lang == "es"
+                else "Type a NYC neighborhood or address."
+            )
+        coords = await self._geocode(q)
+        if coords["lat"] == 0.0 and coords["lng"] == 0.0:
+            return (
+                "No encontre esa zona. Prueba: Jackson Heights, Queens o Lower East Side, Manhattan."
+                if lang == "es"
+                else "Couldn't find that area. Try: Jackson Heights, Queens or Lower East Side, Manhattan."
+            )
+        return await self._onboard_create_vendor_after_pin(
+            phone, name, coords["lat"], coords["lng"], lang
+        )
+
+    async def _onboard_create_vendor_after_pin(
+        self, phone: str, name: str, lat: float, lng: float, lang: str
+    ) -> str:
+        db = SessionLocal()
+        try:
+            import uuid as _uuid
+
+            vid = f"v_{_uuid.uuid4().hex[:8]}"
+            db.execute(
+                text("""
+                    INSERT INTO vendors (id, name, phone, location)
+                    VALUES (:id, :name, :phone,
+                            ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography)
+                    ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name
+                    RETURNING id
+                """),
+                {"id": vid, "name": name, "phone": phone, "lat": lat, "lng": lng},
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        self._set_state(phone, {"step": "awaiting_menu_photo"}, ttl=1800)
+        if lang == "es":
+            return "Listo. Manda una sola foto clara de tu menu."
+        return "Great. Now send one clear photo of your menu."
 
     async def handle_vendor_location(
         self,
@@ -242,12 +322,39 @@ class AgentService:
         self._set_lang(phone, lang)
 
         state = self._get_state(phone)
+        if state and state.get("step") == "awaiting_location":
+            bname = (state.get("business_name") or "").strip()
+            if not bname:
+                self._set_state(
+                    phone, {"step": "awaiting_business_name", "lat": lat, "lng": lng}, ttl=1800
+                )
+                return (
+                    "Recibi tu pin. ¿Como se llama tu negocio?"
+                    if lang == "es"
+                    else "Got your pin. What's your business name?"
+                )
+            return await self._onboard_create_vendor_after_pin(phone, bname, lat, lng, lang)
+
+        if state and state.get("step") == "awaiting_business_name":
+            self._set_state(
+                phone, {"step": "awaiting_business_name", "lat": lat, "lng": lng}, ttl=1800
+            )
+            return (
+                "Pin recibido. ¿Como se llama tu negocio? (solo el nombre.)"
+                if lang == "es"
+                else "Pin received. What's your business name? (name only.)"
+            )
+
         if state and state.get("step") == "awaiting_name_location":
             self._set_state(phone, {"step": "awaiting_name_only", "lat": lat, "lng": lng}, ttl=1800)
             return "Como se llama tu negocio?" if lang == "es" else "What's your business name?"
 
-        self._set_state(phone, {"step": "awaiting_name_only", "lat": lat, "lng": lng}, ttl=1800)
-        return "Como se llama tu negocio?" if lang == "es" else "What's your business name?"
+        self._set_state(phone, {"step": "awaiting_business_name", "lat": lat, "lng": lng}, ttl=1800)
+        return (
+            "Ubicacion recibida. ¿Como se llama tu negocio?"
+            if lang == "es"
+            else "Location received. What's your business name?"
+        )
 
     async def _onboard_step_after_pin(self, phone: str, text_body: str, lang: str) -> str:
         state = self._get_state(phone) or {}
@@ -258,30 +365,7 @@ class AgentService:
             return "Necesito el nombre del negocio." if lang == "es" else "I need your business name."
         if lat is None or lng is None:
             return await self._onboard_step2(phone, text_body, lang)
-
-        db = SessionLocal()
-        try:
-            import uuid as _uuid
-
-            vid = f"v_{_uuid.uuid4().hex[:8]}"
-            db.execute(
-                text("""
-                    INSERT INTO vendors (id, name, phone, location)
-                    VALUES (:id, :name, :phone,
-                            ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography)
-                    ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name
-                    RETURNING id
-                """),
-                {"id": vid, "name": name, "phone": phone, "lat": float(lat), "lng": float(lng)},
-            )
-            db.commit()
-        finally:
-            db.close()
-
-        self._set_state(phone, {"step": "awaiting_menu_photo"}, ttl=1800)
-        if lang == "es":
-            return "Perfecto! Ahora manda foto de tu menu."
-        return "Perfect! Now send a photo of your menu."
+        return await self._onboard_create_vendor_after_pin(phone, name, float(lat), float(lng), lang)
 
     async def _onboard_step2(self, phone: str, text_body: str, lang: str) -> str:
         # Parse name + location from free text using Groq
@@ -311,8 +395,8 @@ class AgentService:
 
         self._set_state(phone, {"step": "awaiting_menu_photo"}, ttl=1800)
         if lang == "es":
-            return "Perfecto! Ahora manda foto de tu menu."
-        return "Perfect! Now send a photo of your menu."
+            return "Listo. Manda una sola foto clara de tu menu."
+        return "Great. Now send one clear photo of your menu."
 
     # ──────────────────────────────────────────────────────────────
     # Menu handling
@@ -328,9 +412,40 @@ class AgentService:
         # If deal is being created, attach media to pending deal
         pending = self._get_pending_deal(vendor_id)
         if pending:
-            pending["media_url"] = media_url or pending.get("media_url")
+            if image_bytes is None:
+                if not media_url:
+                    return (
+                        "Manda la foto del plato para el deal."
+                        if lang == "es"
+                        else "Send the photo of the dish for this deal."
+                    )
+                try:
+                    import httpx
+
+                    async with httpx.AsyncClient(timeout=20.0) as client:
+                        resp = await client.get(
+                            media_url,
+                            auth=(os.getenv("TWILIO_ACCOUNT_SID", ""), os.getenv("TWILIO_AUTH_TOKEN", "")),
+                        )
+                        image_bytes = resp.content
+                except Exception as e:
+                    return (
+                        f"No pude descargar la imagen: {e}"
+                        if lang == "es"
+                        else f"Could not download the image: {e}"
+                    )
+            stored_url = self._upload_menu_image(
+                vendor_id, image_bytes, media_url or "telegram:deal"
+            )
+            pending["media_url"] = stored_url
             self._set_pending_deal(vendor_id, pending)
-            return "Foto guardada. Ahora dime los detalles del deal." if lang == "es" else "Photo saved. Now tell me the deal details."
+            from app.services.deal_parser_service import deal_parser
+
+            missing2 = deal_parser.first_missing_field(pending)
+            if missing2:
+                self._set_state(phone, {"step": "awaiting_deal_field", "missing": missing2})
+                return deal_parser.clarification_question(missing2, lang)
+            return await self._show_deal_confirmation(phone, vendor_id, lang)
 
         # Otherwise treat as menu upload
         if image_bytes is None:
@@ -366,8 +481,8 @@ class AgentService:
         self._set_state(phone, {"step": "awaiting_menu_confirm", "items": items, "media_url": stored_url}, ttl=1800)
         lines = "\n".join([f"• {i['name']} — ${i['price']}" if i.get('price') else f"• {i['name']}" for i in items])
         if lang == "es":
-            return f"Encontre estos articulos:\n{lines}\nCorrecto? Responde SI o dime que cambiar."
-        return f"I found these items in your menu:\n{lines}\n\nIs this correct? Reply YES to save or tell me what to change."
+            return f"Encontre estos articulos:\n{lines}\n¿Todo correcto? Responde SI."
+        return f"I found these items in your menu:\n{lines}\n\nCorrect? Reply YES."
 
     async def _confirm_menu(self, phone: str, vendor_id: str, lang: str) -> str:
         state = self._get_state(phone) or {}
@@ -401,12 +516,14 @@ class AgentService:
 
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         if lang == "es":
-            return (f"Listo! Tu tienda esta en: {frontend_url}/vendor/{slug}\n"
-                    f"Para un deal: FLASH 5pm-7pm tacos 50% 20 porciones\n"
-                    f"Ejemplo: FLASH 5pm-7pm tacos 50%")
-        return (f"✅ Your store is live! {frontend_url}/vendor/{slug}\n\n"
-                f"To launch a deal: FLASH [time] [item] [discount or price]\n"
-                f"Example: FLASH 5pm-7pm tacos 50%")
+            return (
+                f"Listo! Tu tienda: {frontend_url}/vendor/{slug}\n"
+                f"Para un deal escribe FLASH (te preguntamos una cosa a la vez)."
+            )
+        return (
+            f"Your store is live: {frontend_url}/vendor/{slug}\n"
+            f"To post a deal, send FLASH — we'll ask one thing at a time."
+        )
 
     async def _handle_menu_correction(self, phone: str, vendor_id: str, text_body: str, lang: str) -> str:
         # Simple pass-through: re-parse correction with Groq then re-show
@@ -454,8 +571,8 @@ class AgentService:
             lines.append(f"• {m['item_name']} — ${pr}")
         block = "\n".join(lines)
         if lang == "es":
-            return f"Tus artículos:\n{block}\n\n¿Cuál va en el deal? Responde con el nombre exacto."
-        return f"Your items:\n{block}\n\nWhich one is the deal? Reply with the exact name."
+            return f"Tus artículos:\n{block}\n\n¿Cuál es el del deal? (solo el nombre exacto de un ítem.)"
+        return f"Your items:\n{block}\n\nWhich one item is the deal? (Reply with the exact name only.)"
 
     # ──────────────────────────────────────────────────────────────
     # Deal creation flow
@@ -509,6 +626,8 @@ class AgentService:
             if self._looks_like_menu_question(text_body):
                 return await self._menu_items_for_deal_reply(vendor_id, lang)
             pending["item_name"] = text_body.strip()
+        elif missing == "deal_photo":
+            return deal_parser.clarification_question("deal_photo", lang)
 
         self._set_pending_deal(vendor_id, pending)
         missing2 = deal_parser.first_missing_field(pending)

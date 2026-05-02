@@ -108,13 +108,14 @@ export default function SearchPage() {
     handleVoice(queryInput);
   }
 
-  const mapHeightStyle = { height: "calc(100dvh - 48px - env(safe-area-inset-bottom,0px))" };
+  /** Full viewport below header; overlays use flex column so search never stacks on chips. */
+  const mapHeightStyle = { height: "calc(100dvh - 48px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))" };
 
   return (
     <MobileAppFrame>
       <div className="page-enter relative min-h-[100dvh] bg-[var(--is-bg)]">
         <header
-          className="z-[1000] flex h-12 items-center justify-between border-b-[0.5px] border-[var(--is-border-1)] bg-[var(--is-bg)] px-4"
+          className="z-[1000] flex h-12 shrink-0 items-center justify-between border-b-[0.5px] border-[var(--is-border-1)] bg-[var(--is-bg)] px-4"
           style={{ paddingTop: "max(0px, env(safe-area-inset-top))" }}
         >
           <Link
@@ -140,7 +141,7 @@ export default function SearchPage() {
           </div>
         </header>
 
-        <div className="relative w-full" style={mapHeightStyle}>
+        <div className="relative w-full overflow-hidden" style={mapHeightStyle}>
           {location && (
             <OsmMapView
               userLocation={location}
@@ -151,46 +152,48 @@ export default function SearchPage() {
             />
           )}
 
-          <form
-            onSubmit={onSearchSubmit}
-            className="absolute top-[60px] right-4 left-4 z-[1000] flex items-center gap-2 rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-4 py-3"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0 text-[var(--is-text-4)]" aria-hidden>
-              <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.5" />
-              <path d="M20 20l-4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-            <input
-              type="search"
-              enterKeyHint="search"
-              autoComplete="off"
-              placeholder="Search stalls…"
-              disabled={!location || loading}
-              value={queryInput}
-              onChange={(e) => setQueryInput(e.target.value)}
-              className="min-h-[44px] min-w-0 flex-1 bg-transparent text-[15px] text-[var(--is-text-1)] placeholder:text-[var(--is-text-4)] outline-none"
-            />
-            <VoiceDial onTranscript={handleVoice} disabled={!location || loading} variant="dark" />
-          </form>
-
-          <div className="absolute top-[120px] right-0 left-0 z-[999] flex gap-2 overflow-x-auto px-4 pb-2 pt-0 [scrollbar-width:none]">
-            {QUICK_FOOD_PICKS.map((food) => (
-              <button
-                key={food}
-                type="button"
+          <div className="pointer-events-none absolute top-0 right-0 left-0 z-[1000] flex flex-col gap-3 px-4 pt-3">
+            <form
+              onSubmit={onSearchSubmit}
+              className="pointer-events-auto flex items-center gap-2 rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.35)]"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0 text-[var(--is-text-4)]" aria-hidden>
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M20 20l-4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <input
+                type="search"
+                enterKeyHint="search"
+                autoComplete="off"
+                placeholder="Search stalls…"
                 disabled={!location || loading}
-                onClick={() => {
-                  setActiveFilter(food);
-                  handleVoice(food);
-                }}
-                className={`shrink-0 rounded-[20px] border-[0.5px] px-[14px] py-1.5 text-[13px] font-medium whitespace-nowrap ${
-                  activeFilter === food
-                    ? "border-[var(--is-purple)] bg-[var(--is-purple-tint)] text-[var(--is-purple)]"
-                    : "border-[var(--is-border-1)] bg-[var(--is-surface)] text-[var(--is-text-3)]"
-                }`}
-              >
-                {food}
-              </button>
-            ))}
+                value={queryInput}
+                onChange={(e) => setQueryInput(e.target.value)}
+                className="min-h-[44px] min-w-0 flex-1 bg-transparent text-[15px] text-[var(--is-text-1)] placeholder:text-[var(--is-text-4)] outline-none"
+              />
+              <VoiceDial onTranscript={handleVoice} disabled={!location || loading} variant="dark" />
+            </form>
+
+            <div className="pointer-events-auto flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [mask-image:linear-gradient(to_right,black_92%,transparent)]">
+              {QUICK_FOOD_PICKS.map((food) => (
+                <button
+                  key={food}
+                  type="button"
+                  disabled={!location || loading}
+                  onClick={() => {
+                    setActiveFilter(food);
+                    handleVoice(food);
+                  }}
+                  className={`shrink-0 rounded-[20px] border-[0.5px] px-[14px] py-1.5 text-[13px] font-medium whitespace-nowrap ${
+                    activeFilter === food
+                      ? "border-[var(--is-purple)] bg-[var(--is-purple-tint)] text-[var(--is-purple)]"
+                      : "border-[var(--is-border-1)] bg-[var(--is-surface)] text-[var(--is-text-3)]"
+                  }`}
+                >
+                  {food}
+                </button>
+              ))}
+            </div>
           </div>
 
           {loading && (

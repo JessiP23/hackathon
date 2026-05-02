@@ -5,6 +5,8 @@ import string
 from app.db import SessionLocal
 from sqlalchemy import text
 
+from app.services import inapp_events
+
 SERVICE_FEE_RATE = 0.13
 
 
@@ -279,12 +281,23 @@ class OrderService:
 
     def update_status(self, order_id: str, status: str):
         db = SessionLocal()
+        phone = None
         try:
+            row = db.execute(
+                text("SELECT customer_phone FROM orders WHERE id = :oid LIMIT 1"),
+                {"oid": order_id},
+            ).fetchone()
+            phone = row[0] if row else None
             db.execute(text("UPDATE orders SET status = :s WHERE id = :oid"), {"s": status, "oid": order_id})
             db.commit()
-            return {"orderId": order_id, "status": status}
         finally:
             db.close()
+        if phone:
+            inapp_events.try_publish(
+                phone,
+                {"type": "order", "subType": status, "orderId": order_id},
+            )
+        return {"orderId": order_id, "status": status}
 
     def get_recommendations(self, phone: str):
         return {"vendors": []}

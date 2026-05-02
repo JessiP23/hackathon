@@ -6,6 +6,7 @@ from sqlalchemy import text
 from twilio.rest import Client
 
 from app.services.short_url_service import allocate_for_deal
+from app.services import inapp_events
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://infrastreet.app")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
@@ -140,6 +141,21 @@ class NotifyService:
             else:
                 await self._send_twilio(c.phone, msg, TWILIO_CUSTOMER_SID)
 
+            inapp_events.try_publish(
+                c.phone,
+                {
+                    "type": "new_deal",
+                    "dealId": deal_id,
+                    "itemName": deal.get("item_name") or deal_out.get("item_name"),
+                    "vendorName": deal.get("vendor_name") or deal_out.get("vendor_name"),
+                    "dealPrice": deal.get("deal_price"),
+                    "discountPct": deal.get("discount_pct"),
+                    "distMiles": dist,
+                    "shortUrl": f"{_short_link_base()}/d/{short_code}",
+                    "body": msg[:480],
+                },
+            )
+
             self._log_notification(c.id, deal_id, vendor_id, log_ch)
             sent += 1
             if sent % 30 == 0:
@@ -157,6 +173,10 @@ class NotifyService:
 
     def notify_customer_confirmation(self, customer_phone: str, message: str):
         print(f"[Customer SMS] {customer_phone}: {message[:120]}")
+        inapp_events.try_publish(
+            customer_phone,
+            {"type": "order", "subType": "alert", "body": message[:800]},
+        )
         loop = asyncio.get_event_loop()
         if loop.is_running():
             asyncio.create_task(self.send_message(customer_phone, message, "customer"))
