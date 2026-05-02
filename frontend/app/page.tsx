@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getUserByPhone } from "./services/api";
 import { User } from "./shared/types";
 import { MobileAppFrame } from "./components/MobileLayout";
+import { setDemoBrowse } from "./lib/demo";
 
 export default function LandingPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -62,28 +63,15 @@ export default function LandingPage() {
           </div>
 
           <div className="space-y-3">
-            {user.role === "vendor" ? (
-              <>
-                <Link href="/vendor-dashboard" className={pillPrimary}>
-                  Vendor dashboard
-                </Link>
-                <Link href="/search" className={pillSecondary}>
-                  Browse food (customer view)
-                </Link>
-              </>
-            ) : (
-              <>
-                <Link href="/deals" className={pillPrimary}>
-                  Flash deals
-                </Link>
-                <Link href="/search" className={pillSecondary}>
-                  Find food
-                </Link>
-                <Link href="/orders" className={`${pillSecondary} border-transparent bg-transparent text-[var(--infra-ink-3)]`}>
-                  My orders
-                </Link>
-              </>
-            )}
+            <Link href="/deals" className={pillPrimary}>
+              Flash deals
+            </Link>
+            <Link href="/search" className={pillSecondary}>
+              Find food
+            </Link>
+            <Link href="/orders" className={`${pillSecondary} border-transparent bg-transparent text-[var(--infra-ink-3)]`}>
+              My orders
+            </Link>
           </div>
 
           <button
@@ -113,15 +101,15 @@ export default function LandingPage() {
               Infra<span className="text-[var(--infra-accent)]">Street</span>
             </h1>
             <p className="mx-auto mt-5 max-w-[300px] text-[17px] leading-snug text-[var(--infra-ink-2)]">
-              Flash deals & stalls near you. Built for a fast YC demo — SMS-first, mobile web app.
+              Flash deals & stalls near you. Customer PWA — vendors run on Telegram.
             </p>
           </div>
 
           <div className="space-y-6 rounded-[var(--r-xl)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-1)] p-6">
             {[
-              ["Browse deals", "Swipe nearby flash deals, pay with Stripe when wired."],
-              ["Find stalls", "OpenStreetMap + search — real vendor pins."],
-              ["Two-minute onboarding", "Customer = phone + SMS consent. Vendor = phone + location + optional menu photo."],
+              ["Browse deals", "Swipe nearby flash deals; checkout after you save your number."],
+              ["Find stalls", "OpenStreetMap + search — real pins from active vendors."],
+              ["Get started", "Optional phone + SMS consent when you want orders & alerts."],
             ].map(([title, sub]) => (
               <div key={title as string}>
                 <p className="text-[17px] font-semibold tracking-tight text-[var(--infra-ink)]">{title}</p>
@@ -133,10 +121,14 @@ export default function LandingPage() {
 
         <div className="space-y-3 pt-6">
           <Link href="/customer-onboarding" className={pillPrimary}>
-            I&apos;m hungry — get started
+            Get started (phone + SMS)
           </Link>
-          <Link href="/vendor-onboarding" className={pillSecondary}>
-            I&apos;m a vendor
+          <Link
+            href="/deals"
+            className={pillSecondary}
+            onClick={() => setDemoBrowse()}
+          >
+            Browse deals without signing in
           </Link>
           <p className="pt-2 text-center text-[13px] text-[var(--infra-ink-3)]">
             <Link href="/sms-consent" className="text-[var(--infra-blue)] underline underline-offset-2">

@@ -105,10 +105,7 @@ export default function CustomerOnboardingPage() {
           </form>
 
           <p className="text-center text-[13px] text-[var(--infra-ink-3)]">
-            Vendors?{" "}
-            <Link href="/vendor-onboarding" className="font-medium text-[var(--infra-blue)] underline underline-offset-2">
-              Set up your stall
-            </Link>
+            Selling on the street? Vendors onboard via Telegram — not in this app.
           </p>
         </div>
       </div>

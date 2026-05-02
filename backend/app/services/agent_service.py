@@ -100,14 +100,41 @@ class AgentService:
         if low in ("/start", "/help"):
             self._set_lang(phone, lang)
             if vendor:
-                return (
-                    "Ya estas en InfraStreet. Escribe FLASH para un deal."
+                tip = (
+                    " Comandos: /reset (o /newvendor) = borrar tu tienda y registrarte de nuevo desde el saludo. /cleardraft = solo borrar un FLASH a medias."
                     if lang == "es"
-                    else "You're on InfraStreet. Send FLASH to launch a deal."
+                    else " Commands: /reset (or /newvendor) = delete your shop and run full signup again from the welcome. /cleardraft = abort only the FLASH draft."
+                )
+                return (
+                    "Ya estas en InfraStreet. Escribe FLASH para un deal." + tip
+                    if lang == "es"
+                    else "You're on InfraStreet. Send FLASH to launch a deal." + tip
                 )
             return await self._onboard_step1(phone, text_body, telegram_language_code)
 
         self._set_lang(phone, lang)
+
+        if low in ("/cleardraft", "/abortflash"):
+            if vendor:
+                self._clear_pending_deal(vendor["id"])
+            self._clear_state(phone)
+            return (
+                "Listo: borré el deal en borrador. Escribe FLASH cuando quieras."
+                if lang == "es"
+                else "Draft deal cleared. Send FLASH when you're ready."
+            )
+
+        if low in ("/reset", "/newvendor", "/delete_my_shop", "/re_onboard"):
+            self._clear_conversation_kv(phone, vendor)
+            if vendor:
+                vid = vendor["id"]
+                db = SessionLocal()
+                try:
+                    db.execute(text("DELETE FROM vendors WHERE id = :id"), {"id": vid})
+                    db.commit()
+                finally:
+                    db.close()
+            return await self._onboard_step1(phone, "/start", telegram_language_code)
 
         # Photo before we have a vendor record — menu step comes after name/location.
         if not vendor and image_bytes:
@@ -143,6 +170,7 @@ class AgentService:
                 return await self._publish_deal(phone, vendor_id, lang)
             else:
                 self._clear_state(phone)
+                self._clear_pending_deal(vendor_id)
                 return "Deal cancelado. Cuando quieras, manda: FLASH [hora] [artículo] [descuento]" if lang == "es" else "Deal cancelled. Send: FLASH [time] [item] [discount]"
 
         if state and state.get("step") == "awaiting_deal_field":
@@ -174,12 +202,15 @@ class AgentService:
         self._set_state(phone, {"step": "awaiting_name_location"}, ttl=1800)
         if lang == "es":
             return (
-                "Hola! Bienvenido a InfraStreet 🌮 Como se llama tu negocio y donde estas? "
-                "Manda tu ubicacion o escribe la colonia."
+                "Hola! Bienvenido a InfraStreet 🌮 ¿Como se llama tu negocio y donde estas? "
+                "En el teléfono: clip → Ubicación para un pin en el mapa. "
+                "Si no puedes, escribe una linea: Taqueria Maria, Brooklyn NY"
             )
         return (
-            "Hey! Welcome to InfraStreet 🌮 What's your business name and location? "
-            "Send a pin or type your area."
+            "Hey! Welcome to InfraStreet 🌮 What's your business name and area? "
+            "On your phone: tap the paperclip, then Location, to send a map pin "
+            "(Desktop Telegram often can't send location—type one line instead, e.g. "
+            "Maria Tacos, Brooklyn NY)."
         )
 
     async def handle_vendor_location(
@@ -384,6 +415,48 @@ class AgentService:
             return "Entendido. Escribe tus artículos uno por línea:\nEjemplo: Tacos $25"
         return "Got it. Write your items one per line:\nExample: Tacos $25"
 
+    def _looks_like_menu_question(self, raw: str) -> bool:
+        q = raw.strip().lower()
+        if "?" in q:
+            return True
+        needles = (
+            "what ", "what's ", "which ", "how ", "do i have", "my menu",
+            "items do", "items ", "show menu", "list ", "got on",
+            "qué ", "que ", "cuál", "cuales", "cual ", "tengo ",
+            "menú", "menu ", "platos", "articulos",
+        )
+        return any(n in q for n in needles)
+
+    async def _menu_items_for_deal_reply(self, vendor_id: str, lang: str) -> str:
+        db = SessionLocal()
+        try:
+            rows = db.execute(
+                text(
+                    "SELECT item_name, price FROM menus WHERE vendor_id = :v "
+                    "AND COALESCE(is_available, true) = true ORDER BY item_name LIMIT 40"
+                ),
+                {"v": vendor_id},
+            ).fetchall()
+        finally:
+            db.close()
+        if not rows:
+            if lang == "es":
+                return (
+                    "No hay artículos en tu menú. Escribe el nombre del plato para el deal "
+                    "(ej. Tacos al pastor)."
+                )
+            return "No saved menu items yet. Type the dish name for this deal (e.g. Tacos)."
+
+        lines = []
+        for row in rows:
+            m = dict(row._mapping)
+            pr = m.get("price")
+            lines.append(f"• {m['item_name']} — ${pr}")
+        block = "\n".join(lines)
+        if lang == "es":
+            return f"Tus artículos:\n{block}\n\n¿Cuál va en el deal? Responde con el nombre exacto."
+        return f"Your items:\n{block}\n\nWhich one is the deal? Reply with the exact name."
+
     # ──────────────────────────────────────────────────────────────
     # Deal creation flow
     # ──────────────────────────────────────────────────────────────
@@ -433,6 +506,8 @@ class AgentService:
                 else:
                     pending["deal_price"] = float(nums[0])
         elif missing == "item_name":
+            if self._looks_like_menu_question(text_body):
+                return await self._menu_items_for_deal_reply(vendor_id, lang)
             pending["item_name"] = text_body.strip()
 
         self._set_pending_deal(vendor_id, pending)
@@ -463,12 +538,12 @@ class AgentService:
                     f"• {item} — {price_str}{orig_str}\n"
                     f"• {qty} órdenes disponibles\n"
                     f"• Hasta {end_time} · {radius} millas de radio\n\n"
-                    f"¿Publicamos? Responde SÍ")
+                    f"¿Publicamos? Responde SÍ (o el botón) — o NO para cancelar.")
         return (f"🔥 Deal ready to publish:\n"
                 f"• {item} — {price_str}{orig_str}\n"
                 f"• {qty} orders available\n"
                 f"• Until {end_time} · {radius} mile radius\n\n"
-                f"Publish? Reply YES")
+                f"Publish? Reply YES (or tap SI) — or NO to cancel.")
 
     async def _publish_deal(self, phone: str, vendor_id: str, lang: str) -> str:
         pending = self._get_pending_deal(vendor_id) or {}
@@ -580,6 +655,15 @@ class AgentService:
 
     def _clear_state(self, phone: str):
         self._kv_del(f"state:{phone}")
+
+    def _clear_conversation_kv(self, phone: str, vendor: dict | None) -> None:
+        """All bot-side keys for this chat (Redis/memory). Does not touch Postgres."""
+        self._clear_state(phone)
+        self._kv_del(f"lang:{phone}")
+        if vendor:
+            vid = vendor["id"]
+            self._clear_pending_deal(vid)
+            self._kv_del(f"media:{vid}")
 
     def _get_pending_deal(self, vendor_id: str):
         v = self._kv_get(f"pending_deal:{vendor_id}")

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { getVendor, placeOrder } from "@/app/services/api";
 import { Vendor, MenuItem, Order } from "@/app/shared/types";
 import { MobileAppFrame, MobileNav } from "@/app/components/MobileLayout";
+import { isDemoBrowse } from "@/app/lib/demo";
 
 export default function VendorPage() {
   const params = useParams();
@@ -54,6 +55,10 @@ export default function VendorPage() {
     if (!vendor || getCount() === 0) return;
     const phone = localStorage.getItem("infrastreet_phone");
     if (!phone) {
+      if (isDemoBrowse()) {
+        alert("Demo: add your phone on Get started to place a real order.");
+        return;
+      }
       router.push("/customer-onboarding");
       return;
     }

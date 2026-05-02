@@ -8,6 +8,7 @@ import { getDealsNearby, placeDealOrder, notifyOptIn } from "@/app/services/api"
 import { Deal, Location } from "@/app/shared/types";
 import DealTile from "@/app/components/DealTile";
 import { MobileAppFrame } from "@/app/components/MobileLayout";
+import { isDemoBrowse } from "@/app/lib/demo";
 
 export default function DealsPage() {
   const router = useRouter();
@@ -19,6 +20,11 @@ export default function DealsPage() {
   const [stackIndex, setStackIndex] = useState(0);
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [notifyMsg, setNotifyMsg] = useState<string | null>(null);
+  const [showDemoBanner, setShowDemoBanner] = useState(false);
+
+  useEffect(() => {
+    setShowDemoBanner(isDemoBrowse() && !localStorage.getItem("infrastreet_phone"));
+  }, []);
 
   useEffect(() => {
     const q =
@@ -44,6 +50,10 @@ export default function DealsPage() {
     async (deal: Deal) => {
       const phone = localStorage.getItem("infrastreet_phone");
       if (!phone) {
+        if (isDemoBrowse()) {
+          alert("Demo: tap Get started to add your number, then you can reserve and pay.");
+          return;
+        }
         router.push("/customer-onboarding");
         return;
       }
@@ -141,7 +151,18 @@ export default function DealsPage() {
   return (
     <MobileAppFrame>
       <main className="relative flex min-h-[100dvh] flex-col overflow-hidden bg-[var(--infra-black)] text-[var(--infra-ink)]">
-        <header className="pointer-events-none absolute left-0 right-0 top-0 z-40 flex items-center justify-between px-5 py-4 [padding-top:max(12px,env(safe-area-inset-top))]">
+        <header className="pointer-events-none absolute left-0 right-0 top-0 z-40 flex flex-col px-0 [padding-top:max(12px,env(safe-area-inset-top))]">
+          {showDemoBanner && (
+              <div className="pointer-events-auto mb-1 w-full px-4 py-2 text-center">
+                <Link
+                  href="/customer-onboarding"
+                  className="inline-block rounded-lg bg-[var(--infra-tile-2)]/95 px-3 py-1.5 text-[12px] font-medium text-[var(--infra-ink)] ring-1 ring-[var(--infra-ink-4)]"
+                >
+                  Demo browse — Get started to reserve
+                </Link>
+              </div>
+            )}
+          <div className="flex w-full items-center justify-between px-5 py-2">
           <Link href="/search" className="pointer-events-auto text-[14px] font-medium text-[var(--infra-ink-2)] active:text-[var(--infra-ink)]">
             ← Search
           </Link>
@@ -151,6 +172,7 @@ export default function DealsPage() {
           <Link href="/orders" className="pointer-events-auto text-[14px] font-medium text-[var(--infra-blue)]">
             Orders
           </Link>
+          </div>
         </header>
 
       {loading && (
