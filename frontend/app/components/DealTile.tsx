@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, useMotionValue, animate } from "framer-motion";
 import { Deal } from "../shared/types";
 
-const ACCENT = "#E63946";
+const ACCENT = "#ff3b30";
 const INK = "#1D1D1F";
 const CANVAS = "#FFFFFF";
 const PARCHMENT = "#F5F5F7";

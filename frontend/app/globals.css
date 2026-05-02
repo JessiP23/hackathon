@@ -1,31 +1,94 @@
 @import "tailwindcss";
 
+/* InfraStreet · iOS-style dark product UI (see design reference) */
 :root {
-  --color-ink: #1d1d1f;
-  --color-canvas: #ffffff;
-  --color-parchment: #f5f5f7;
-  --color-accent: #e63946;
-  --color-muted: rgba(29, 29, 31, 0.6);
-  --background: var(--color-canvas);
-  --foreground: var(--color-ink);
+  --infra-black: #000000;
+  --infra-tile-1: #1c1c1e;
+  --infra-tile-2: #2c2c2e;
+  --infra-tile-3: #3a3a3c;
+  --infra-ink: #ffffff;
+  --infra-ink-2: rgba(255, 255, 255, 0.72);
+  --infra-ink-3: rgba(255, 255, 255, 0.4);
+  --infra-ink-4: rgba(255, 255, 255, 0.18);
+  --infra-accent: #ff3b30;
+  --infra-accent-2: rgba(255, 59, 48, 0.14);
+  --infra-blue: #0a84ff;
+  --infra-green: #30d158;
+  --infra-amber: #ffd60a;
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+  --r-pill: 100px;
+
+  /* Legacy aliases → map to Infra dark */
+  --background: var(--infra-black);
+  --foreground: var(--infra-ink);
+  --color-canvas: var(--infra-black);
+  --color-parchment: var(--infra-tile-1);
+  --color-ink: var(--infra-ink);
+  --color-muted: var(--infra-ink-2);
+  --color-accent: var(--infra-accent);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  background: var(--infra-black);
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
-  background: var(--color-canvas);
-  color: var(--color-ink);
-  font-family:
-    system-ui,
-    -apple-system,
-    "SF Pro Text",
-    "Inter",
-    sans-serif;
+  background: var(--infra-black);
+  color: var(--infra-ink);
+  font-size: 17px;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Leaflet · OpenStreetMap (dark chrome) */
+.leaflet-container {
+  font-family: inherit;
+  background: var(--infra-tile-2) !important;
+}
+
+.leaflet-control-zoom a {
+  background: var(--infra-tile-1) !important;
+  color: var(--infra-ink) !important;
+  border-color: var(--infra-ink-4) !important;
+}
+
+.leaflet-control-attribution {
+  background: rgba(0, 0, 0, 0.6) !important;
+  color: rgba(255, 255, 255, 0.55) !important;
+  font-size: 10px !important;
+  border-top-left-radius: 8px;
+}
+
+.leaflet-control-attribution a {
+  color: var(--infra-blue) !important;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 12px;
+  background: var(--infra-tile-1);
+  color: var(--infra-ink);
+}
+
+.leaflet-popup-tip {
+  background: var(--infra-tile-1);
+}
+
+.leaflet-popup-content {
+  margin: 10px 12px;
+  font-size: 14px;
 }
 
 /* Animations */

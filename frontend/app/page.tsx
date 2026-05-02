@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getUserByPhone } from "./services/api";
 import { User } from "./shared/types";
-
-const accent = "#E63946";
+import { MobileAppFrame } from "./components/MobileLayout";
 
 export default function LandingPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -27,27 +26,36 @@ export default function LandingPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-[var(--color-parchment)]">
-        <div
-          className="w-[min(92vw,380px)] aspect-[4/5] max-h-[70vh] rounded-3xl animate-pulse bg-gradient-to-br from-neutral-200 via-neutral-100 to-neutral-200"
-          aria-hidden
-        />
-      </main>
+      <MobileAppFrame>
+        <div className="flex min-h-[70vh] items-center justify-center">
+          <div
+            className="aspect-[4/5] w-[min(92vw,380px)] max-h-[70vh] animate-pulse rounded-3xl bg-[var(--infra-tile-1)]"
+            aria-hidden
+          />
+        </div>
+      </MobileAppFrame>
     );
   }
 
-  const pillBtn =
-    "flex h-14 w-full items-center justify-center rounded-full font-semibold text-[17px] tracking-tight transition-transform active:scale-[0.98]";
+  const pillPrimary =
+    "flex h-14 w-full items-center justify-center rounded-[var(--r-pill)] bg-[var(--infra-accent)] text-[17px] font-semibold text-white shadow-lg transition-transform active:scale-[0.98]";
+  const pillSecondary =
+    "flex h-14 w-full items-center justify-center rounded-[var(--r-pill)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-2)] text-[17px] font-semibold text-[var(--infra-ink)] transition-transform active:scale-[0.98]";
 
   if (user) {
     return (
-      <main className="min-h-screen bg-[var(--color-parchment)] text-[var(--color-ink)] px-6 pb-12">
-        <div className="max-w-md mx-auto pt-16 space-y-10">
+      <MobileAppFrame>
+        <header className="flex h-11 items-center justify-center border-b border-[var(--infra-ink-4)] px-5">
+          <span className="text-[17px] font-semibold tracking-[-0.5px]">
+            InfraStreet<sup className="ml-0.5 align-super text-[9px] font-semibold text-[var(--infra-accent)]">BETA</sup>
+          </span>
+        </header>
+        <div className="space-y-10 px-6 pb-16 pt-12">
           <div>
-            <p className="text-[15px] font-normal text-[var(--color-muted)]">Welcome back</p>
+            <p className="text-[15px] text-[var(--infra-ink-2)]">Welcome back</p>
             <h1
-              className="mt-1 font-semibold tracking-tight text-[var(--color-ink)]"
-              style={{ fontSize: "clamp(32px, 8vw, 40px)", letterSpacing: "-0.4px" }}
+              className="mt-2 font-semibold tracking-tight text-[var(--infra-ink)]"
+              style={{ fontSize: "clamp(32px, 8vw, 40px)", letterSpacing: "-0.45px", lineHeight: 1.08 }}
             >
               {user.name || user.phone}
             </h1>
@@ -56,35 +64,22 @@ export default function LandingPage() {
           <div className="space-y-3">
             {user.role === "vendor" ? (
               <>
-                <Link
-                  href="/vendor-dashboard"
-                  className={`${pillBtn} text-white shadow-lg`}
-                  style={{ backgroundColor: accent }}
-                >
-                  Dashboard
+                <Link href="/vendor-dashboard" className={pillPrimary}>
+                  Vendor dashboard
                 </Link>
-                <Link
-                  href="/search"
-                  className={`${pillBtn} border border-black/[0.08] bg-white text-[var(--color-ink)]`}
-                >
-                  Browse food
+                <Link href="/search" className={pillSecondary}>
+                  Browse food (customer view)
                 </Link>
               </>
             ) : (
               <>
-                <Link href="/deals" className={`${pillBtn} text-white shadow-lg`} style={{ backgroundColor: accent }}>
-                  Hot deals
+                <Link href="/deals" className={pillPrimary}>
+                  Flash deals
                 </Link>
-                <Link
-                  href="/search"
-                  className={`${pillBtn} border border-black/[0.08] bg-white text-[var(--color-ink)]`}
-                >
+                <Link href="/search" className={pillSecondary}>
                   Find food
                 </Link>
-                <Link
-                  href="/orders"
-                  className={`${pillBtn} bg-transparent text-[var(--color-muted)] underline-offset-4 hover:underline`}
-                >
+                <Link href="/orders" className={`${pillSecondary} border-transparent bg-transparent text-[var(--infra-ink-3)]`}>
                   My orders
                 </Link>
               </>
@@ -97,67 +92,59 @@ export default function LandingPage() {
               localStorage.clear();
               setUser(null);
             }}
-            className="w-full text-[15px] text-[var(--color-muted)] py-4"
+            className="w-full py-4 text-[15px] text-[var(--infra-ink-3)] active:text-[var(--infra-ink-2)]"
           >
             Sign out
           </button>
         </div>
-      </main>
+      </MobileAppFrame>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[var(--color-canvas)] text-[var(--color-ink)]">
-      <div className="max-w-md mx-auto px-6 pt-14 pb-12 min-h-screen flex flex-col">
-        <div className="flex-1 space-y-12">
-          <div className="text-center pt-6">
+    <MobileAppFrame>
+      <div className="flex min-h-[100dvh] flex-col px-6 pb-12 pt-12">
+        <div className="flex flex-1 flex-col space-y-12">
+          <div className="text-center pt-4">
             <h1
-              className="font-semibold tracking-tight leading-none"
-              style={{ fontSize: "clamp(40px, 11vw, 52px)", letterSpacing: "-0.5px" }}
+              className="font-semibold leading-none tracking-tight text-[var(--infra-ink)]"
+              style={{ fontSize: "clamp(40px, 11vw, 52px)", letterSpacing: "-0.55px" }}
             >
-              Infra
-              <span style={{ color: accent }}>Street</span>
+              Infra<span className="text-[var(--infra-accent)]">Street</span>
             </h1>
-            <p className="text-[17px] text-[var(--color-muted)] mt-4 leading-snug max-w-[280px] mx-auto">
-              Find food on your block. Reverent food, zero chrome.
+            <p className="mx-auto mt-5 max-w-[300px] text-[17px] leading-snug text-[var(--infra-ink-2)]">
+              Flash deals & stalls near you. Built for a fast YC demo — SMS-first, mobile web app.
             </p>
           </div>
 
-          <div className="rounded-[28px] border border-black/[0.06] bg-[var(--color-parchment)] p-6 space-y-6 shadow-sm">
+          <div className="space-y-6 rounded-[var(--r-xl)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-1)] p-6">
             {[
-              ["Speak to search", "Say what you want — we match vendors nearby."],
-              ["Reserve in one tap", "Pickup code and Stripe checkout — fast."],
-              ["Support the street", "Real carts, real menus from Telegram."],
+              ["Browse deals", "Swipe nearby flash deals, pay with Stripe when wired."],
+              ["Find stalls", "OpenStreetMap + search — real vendor pins."],
+              ["Two-minute onboarding", "Customer = phone + SMS consent. Vendor = phone + location + optional menu photo."],
             ].map(([title, sub]) => (
               <div key={title as string}>
-                <p className="text-[17px] font-semibold tracking-tight text-[var(--color-ink)]">{title}</p>
-                <p className="text-[15px] text-[var(--color-muted)] mt-1 leading-snug">{sub}</p>
+                <p className="text-[17px] font-semibold tracking-tight text-[var(--infra-ink)]">{title}</p>
+                <p className="mt-1 text-[15px] leading-snug text-[var(--infra-ink-2)]">{sub}</p>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="space-y-3 pt-4">
-          <Link
-            href="/customer-onboarding"
-            className={`${pillBtn} text-white shadow-md`}
-            style={{ backgroundColor: accent }}
-          >
-            Find food
+        <div className="space-y-3 pt-6">
+          <Link href="/customer-onboarding" className={pillPrimary}>
+            I&apos;m hungry — get started
           </Link>
-          <Link
-            href="/vendor-onboarding"
-            className={`${pillBtn} border-2 border-[var(--color-ink)]/15 bg-transparent text-[var(--color-ink)]`}
-          >
+          <Link href="/vendor-onboarding" className={pillSecondary}>
             I&apos;m a vendor
           </Link>
-          <p className="text-center text-[13px] text-[var(--color-muted)] pt-2">
-            <Link href="/sms-consent" className="underline underline-offset-2 hover:text-[var(--color-ink)]">
+          <p className="pt-2 text-center text-[13px] text-[var(--infra-ink-3)]">
+            <Link href="/sms-consent" className="text-[var(--infra-blue)] underline underline-offset-2">
               SMS terms & consent
             </Link>
           </p>
         </div>
       </div>
-    </main>
+    </MobileAppFrame>
   );
 }

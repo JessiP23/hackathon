@@ -37,12 +37,26 @@ def create_scheduler():
 
 
 def expire_deals():
-    from app.services.deal_service import DealService
+    try:
+        from app.services.deal_service import DealService
 
-    DealService().expire_old_deals()
+        DealService().expire_old_deals()
+    except Exception as e:
+        import traceback
+
+        print(f"[Scheduler] expire_deals failed: {e}\n{traceback.format_exc()}", flush=True)
 
 
 async def auto_flash_engine():
+    try:
+        await _auto_flash_engine_inner()
+    except Exception as e:
+        import traceback
+
+        print(f"[Scheduler] auto_flash_engine failed: {e}\n{traceback.format_exc()}", flush=True)
+
+
+async def _auto_flash_engine_inner():
     db = SessionLocal()
     try:
         slow_vendors = db.execute(
@@ -165,6 +179,18 @@ async def _create_auto_deal(vendor):
 
 async def weekly_stats_hourly():
     """Fire once per ISO week per vendor when local Monday hour == 9."""
+    try:
+        await _weekly_stats_hourly_inner()
+    except Exception as e:
+        import traceback
+
+        print(
+            f"[Scheduler] weekly_stats_hourly failed: {e}\n{traceback.format_exc()}",
+            flush=True,
+        )
+
+
+async def _weekly_stats_hourly_inner():
     try:
         from zoneinfo import ZoneInfo
     except ImportError:

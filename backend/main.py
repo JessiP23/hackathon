@@ -50,7 +50,20 @@ async def shutdown_event():
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "service": "infrastreet-api"}
+    body = {"status": "healthy", "service": "infrastreet-api"}
+    url = os.getenv("REDIS_URL", "").strip()
+    if not url:
+        body["redis"] = "unset"
+        return body
+    try:
+        import redis
+
+        r = redis.from_url(url, decode_responses=True, socket_connect_timeout=3)
+        r.ping()
+        body["redis"] = "ok"
+    except Exception:
+        body["redis"] = "error"
+    return body
 
 
 @app.get("/")

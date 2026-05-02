@@ -7,6 +7,7 @@ import { getCurrentLocation } from "@/app/services/location";
 import { getDealsNearby, placeDealOrder, notifyOptIn } from "@/app/services/api";
 import { Deal, Location } from "@/app/shared/types";
 import DealTile from "@/app/components/DealTile";
+import { MobileAppFrame } from "@/app/components/MobileLayout";
 
 export default function DealsPage() {
   const router = useRouter();
@@ -138,59 +139,62 @@ export default function DealsPage() {
   const stackSlice = sortedDeals.slice(stackIndex, stackIndex + 3);
 
   return (
-    <main className="min-h-[100dvh] bg-[#1D1D1F] text-white overflow-hidden flex flex-col">
-      <header className="absolute top-0 left-0 right-0 z-40 px-5 py-4 flex justify-between items-center pointer-events-none">
-        <Link href="/search" className="pointer-events-auto text-white/70 text-sm font-medium">
-          ← Back
-        </Link>
-        <span className="text-sm font-semibold tracking-tight text-white/90">InfraStreet</span>
-        <Link href="/orders" className="pointer-events-auto text-white/70 text-sm font-medium">
-          Orders
-        </Link>
-      </header>
+    <MobileAppFrame>
+      <main className="relative flex min-h-[100dvh] flex-col overflow-hidden bg-[var(--infra-black)] text-[var(--infra-ink)]">
+        <header className="pointer-events-none absolute left-0 right-0 top-0 z-40 flex items-center justify-between px-5 py-4 [padding-top:max(12px,env(safe-area-inset-top))]">
+          <Link href="/search" className="pointer-events-auto text-[14px] font-medium text-[var(--infra-ink-2)] active:text-[var(--infra-ink)]">
+            ← Search
+          </Link>
+          <span className="pointer-events-none text-center text-[14px] font-semibold tracking-tight text-[var(--infra-ink)]">
+            Deals
+          </span>
+          <Link href="/orders" className="pointer-events-auto text-[14px] font-medium text-[var(--infra-blue)]">
+            Orders
+          </Link>
+        </header>
 
       {loading && (
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex flex-1 items-center justify-center">
           <div
-            className="w-[min(100vw,420px)] aspect-[3/4] rounded-2xl animate-pulse bg-gradient-to-br from-neutral-800 via-neutral-700 to-neutral-900"
+            className="aspect-[3/4] w-[min(100vw,420px)] animate-pulse rounded-2xl bg-[var(--infra-tile-1)]"
             aria-hidden
           />
         </div>
       )}
 
       {!loading && sortedDeals.length === 0 && (
-        <div className="relative flex-1 flex flex-col items-center justify-center text-center px-6 overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-b from-zinc-900 via-neutral-800 to-black" />
-          <div className="absolute inset-0 opacity-40 animate-pulse bg-gradient-to-t from-white/5 via-transparent to-white/10" />
+        <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6 text-center">
+          <div className="absolute inset-0 bg-[var(--infra-black)]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[var(--infra-tile-1)]/80 via-transparent to-[var(--infra-black)]" />
 
           <div className="relative z-10 max-w-md">
             <h1
-              className="text-white font-semibold tracking-tight mb-3"
+              className="mb-3 font-semibold tracking-tight text-[var(--infra-ink)]"
               style={{ fontSize: "clamp(28px, 7vw, 34px)", letterSpacing: "-0.4px" }}
             >
               The street is quiet... for now.
             </h1>
-            <p className="text-[17px] text-white/80 mb-8 leading-snug">
+            <p className="mb-8 text-[17px] leading-snug text-[var(--infra-ink-2)]">
               We&apos;ll text you when deals heat up nearby.
             </p>
             <button
               type="button"
               disabled={notifyBusy}
               onClick={onNotifyMe}
-              className="h-14 w-full max-w-xs mx-auto rounded-full border border-white text-white font-semibold text-[17px] bg-white/20 backdrop-blur-sm disabled:opacity-50 active:scale-[0.98] transition-transform"
+              className="mx-auto flex h-14 w-full max-w-xs items-center justify-center rounded-[var(--r-pill)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-2)] text-[17px] font-semibold text-[var(--infra-ink)] disabled:opacity-50 active:scale-[0.98]"
             >
               {notifyBusy ? "Saving…" : "Notify me"}
             </button>
-            {notifyMsg && <p className="mt-4 text-sm text-white/80">{notifyMsg}</p>}
+            {notifyMsg && <p className="mt-4 text-[14px] text-[var(--infra-ink-2)]">{notifyMsg}</p>}
           </div>
         </div>
       )}
 
       {!loading && sortedDeals.length > 0 && (
-        <div className="relative flex-1 h-[100dvh]">
+        <div className="relative h-[100dvh] flex-1">
           {ordering && (
-            <div className="absolute inset-0 z-50 bg-black/30 flex items-center justify-center">
-              <span className="text-sm font-medium text-white">Redirecting to checkout…</span>
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40">
+              <span className="text-[14px] font-medium text-[var(--infra-ink)]">Redirecting to checkout…</span>
             </div>
           )}
           {stackSlice.map((deal, i) => (
@@ -203,11 +207,12 @@ export default function DealsPage() {
               onSwipeNext={onSwipeNext}
             />
           ))}
-          <p className="absolute bottom-3 left-0 right-0 text-center text-[11px] text-white/40 z-40 pointer-events-none">
+          <p className="pointer-events-none absolute bottom-8 left-0 right-0 z-40 text-center text-[11px] text-[var(--infra-ink-3)] [padding-bottom:env(safe-area-inset-bottom)]">
             Swipe up for next deal
           </p>
         </div>
       )}
     </main>
+    </MobileAppFrame>
   );
 }

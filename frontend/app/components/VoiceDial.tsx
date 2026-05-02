@@ -34,9 +34,10 @@ interface Props {
   /** Inline with search bar; omit fixed bottom-right positioning */
   className?: string;
   disabled?: boolean;
+  variant?: "dark" | "light";
 }
 
-export default function VoiceDial({ onTranscript, className, disabled }: Props) {
+export default function VoiceDial({ onTranscript, className, disabled, variant = "dark" }: Props) {
   const [recording, setRecording] = useState(false);
 
   async function handleClick() {
@@ -89,7 +90,12 @@ export default function VoiceDial({ onTranscript, className, disabled }: Props) 
   }
 
   const base =
-    "shrink-0 w-14 h-14 rounded-full text-white text-xl flex items-center justify-center shadow-lg active:scale-95 transition-colors disabled:opacity-40 disabled:pointer-events-none border border-white/10";
+    "shrink-0 w-14 h-14 rounded-full text-xl flex items-center justify-center shadow-lg active:scale-95 transition-colors disabled:opacity-40 disabled:pointer-events-none";
+
+  const idle =
+    variant === "light"
+      ? "border border-black/[0.1] bg-[var(--color-parchment)] text-[var(--color-ink)] hover:bg-white"
+      : "border border-white/10 bg-neutral-900 text-white hover:bg-neutral-800";
 
   return (
     <button
@@ -97,7 +103,7 @@ export default function VoiceDial({ onTranscript, className, disabled }: Props) 
       aria-label={recording ? "Stop listening" : "Search by voice"}
       disabled={disabled}
       onClick={handleClick}
-      className={`${base} ${recording ? "bg-red-500 animate-pulse" : "bg-neutral-900 hover:bg-neutral-800"} ${className ?? ""}`}
+      className={`${base} ${recording ? "border border-red-400/40 bg-red-500 animate-pulse text-white" : idle} ${className ?? ""}`}
     >
       {recording ? "⏹" : "🎤"}
     </button>

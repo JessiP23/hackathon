@@ -17,6 +17,21 @@ def _tg_phone(chat_id: int) -> str:
     return f"tg:{chat_id}"
 
 
+def _callback_chat_id(cq: dict) -> int | None:
+    """Telegram sometimes omits message on edge cases; DM fallback is from.id == private chat id."""
+    msg = cq.get("message")
+    if isinstance(msg, dict):
+        chat = msg.get("chat") or {}
+        cid = chat.get("id")
+        if cid is not None:
+            return int(cid)
+    fr = cq.get("from") or {}
+    cid = fr.get("id")
+    if cid is not None:
+        return int(cid)
+    return None
+
+
 def _inline_for_step(step: str | None) -> dict | None:
     if step == "awaiting_deal_confirm":
         return {
@@ -44,10 +59,14 @@ async def telegram_webhook(request: Request):
     if "callback_query" in update:
         cq = update["callback_query"]
         cq_id = cq["id"]
-        chat_id = cq["message"]["chat"]["id"]
+        chat_id = _callback_chat_id(cq)
         data = (cq.get("data") or "").strip()
-        phone = _tg_phone(chat_id)
 
+        if chat_id is None:
+            await telegram_client.answer_callback_query(cq_id, text="Could not resolve chat.")
+            return {"ok": True}
+
+        phone = _tg_phone(chat_id)
         await telegram_client.answer_callback_query(cq_id)
 
         if data.startswith("cancel_"):
@@ -76,9 +95,25 @@ async def telegram_webhook(request: Request):
         else:
             body = data
 
-        reply = await agent_service.handle_vendor_message(phone, body)
-        markup = _inline_for_step((agent_service._get_state(phone) or {}).get("step"))
-        await telegram_client.send_message(chat_id, reply, reply_markup=markup)
+        try:
+            reply = await agent_service.handle_vendor_message(phone, body)
+            markup = _inline_for_step((agent_service._get_state(phone) or {}).get("step"))
+            sm = await telegram_client.send_message(chat_id, reply, reply_markup=markup)
+            if not sm.get("ok"):
+                err = sm.get("description") or sm.get("text") or str(sm)
+                print(f"[telegram] sendMessage failed: {err}", flush=True)
+                await telegram_client.send_message(
+                    chat_id,
+                    f"Could not deliver the reply. ({err}) Try typing YES or Editar as text.",
+                )
+        except Exception as e:
+            import traceback
+
+            print(f"[telegram] callback error: {e}\n{traceback.format_exc()}", flush=True)
+            await telegram_client.send_message(
+                chat_id,
+                f"Something went wrong. Type YES to confirm the menu or Editar to fix: {e}",
+            )
         return {"ok": True}
 
     msg = update.get("message") or update.get("edited_message")

@@ -49,6 +49,30 @@ class AgentService:
         api_key = os.getenv("GROQ_API_KEY")
         self._groq = Groq(api_key=api_key) if GROQ_OK and api_key else None
         self._redis = _redis()
+        self._mem_store: dict[str, str] = {}
+        if not self._redis:
+            print(
+                "[AgentService] Redis unavailable — using in-memory KV for bot state "
+                "(set REDIS_URL on Fly; without it, multi-machine deploys won’t share state).",
+                flush=True,
+            )
+
+    def _kv_get(self, key: str) -> str | None:
+        if self._redis:
+            return self._redis.get(key)
+        return self._mem_store.get(key)
+
+    def _kv_setex(self, key: str, ttl: int, val: str) -> None:
+        if self._redis:
+            self._redis.setex(key, ttl, val)
+        else:
+            self._mem_store[key] = val
+
+    def _kv_del(self, key: str) -> None:
+        if self._redis:
+            self._redis.delete(key)
+        else:
+            self._mem_store.pop(key, None)
 
     # ──────────────────────────────────────────────────────────────
     # Main entry point
@@ -548,51 +572,33 @@ class AgentService:
     # Helpers — Redis state
     # ──────────────────────────────────────────────────────────────
     def _get_state(self, phone: str):
-        if not self._redis:
-            return None
-        v = self._redis.get(f"state:{phone}")
+        v = self._kv_get(f"state:{phone}")
         return json.loads(v) if v else None
 
     def _set_state(self, phone: str, state: dict, ttl: int = 3600):
-        if not self._redis:
-            return
-        self._redis.setex(f"state:{phone}", ttl, json.dumps(state))
+        self._kv_setex(f"state:{phone}", ttl, json.dumps(state))
 
     def _clear_state(self, phone: str):
-        if not self._redis:
-            return
-        self._redis.delete(f"state:{phone}")
+        self._kv_del(f"state:{phone}")
 
     def _get_pending_deal(self, vendor_id: str):
-        if not self._redis:
-            return None
-        v = self._redis.get(f"pending_deal:{vendor_id}")
+        v = self._kv_get(f"pending_deal:{vendor_id}")
         return json.loads(v) if v else None
 
     def _set_pending_deal(self, vendor_id: str, deal: dict, ttl: int = 1800):
-        if not self._redis:
-            return
-        self._redis.setex(f"pending_deal:{vendor_id}", ttl, json.dumps(deal))
+        self._kv_setex(f"pending_deal:{vendor_id}", ttl, json.dumps(deal))
 
     def _clear_pending_deal(self, vendor_id: str):
-        if not self._redis:
-            return
-        self._redis.delete(f"pending_deal:{vendor_id}")
+        self._kv_del(f"pending_deal:{vendor_id}")
 
     def _cache_media(self, vendor_id: str, url: str, ttl: int = 3600):
-        if not self._redis:
-            return
-        self._redis.setex(f"media:{vendor_id}", ttl, url)
+        self._kv_setex(f"media:{vendor_id}", ttl, url)
 
     def _get_lang(self, phone: str):
-        if not self._redis:
-            return None
-        return self._redis.get(f"lang:{phone}")
+        return self._kv_get(f"lang:{phone}")
 
     def _set_lang(self, phone: str, lang: str):
-        if not self._redis:
-            return
-        self._redis.setex(f"lang:{phone}", 86400, lang)
+        self._kv_setex(f"lang:{phone}", 86400, lang)
 
     # ──────────────────────────────────────────────────────────────
     # Helpers — NLP

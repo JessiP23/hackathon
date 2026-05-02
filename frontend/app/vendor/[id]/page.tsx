@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { getVendor, placeOrder } from "@/app/services/api";
 import { Vendor, MenuItem, Order } from "@/app/shared/types";
+import { MobileAppFrame, MobileNav } from "@/app/components/MobileLayout";
 
 export default function VendorPage() {
   const params = useParams();
@@ -51,9 +52,13 @@ export default function VendorPage() {
 
   async function handleOrder() {
     if (!vendor || getCount() === 0) return;
+    const phone = localStorage.getItem("infrastreet_phone");
+    if (!phone) {
+      router.push("/customer-onboarding");
+      return;
+    }
     setOrdering(true);
     try {
-      const phone = localStorage.getItem("infrastreet_phone") || "guest";
       const items = Object.entries(cart).map(([itemId, quantity]) => ({ itemId, quantity }));
       const result = await placeOrder({ vendorId: vendor.vendorId, customerPhone: phone, items });
       setOrder(result);
@@ -67,103 +72,109 @@ export default function VendorPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-neutral-950 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
-      </main>
+      <MobileAppFrame>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--infra-ink-4)] border-t-[var(--infra-accent)]" />
+        </div>
+      </MobileAppFrame>
     );
   }
 
   if (!vendor) return null;
 
-  // Order Success
   if (order) {
     return (
-      <main className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center p-6">
-        <div className="w-20 h-20 bg-green-500/20 border border-green-500/30 rounded-full flex items-center justify-center mb-8">
-          <span className="text-green-400 text-3xl">✓</span>
-        </div>
-        
-        <h1 className="text-3xl font-black mb-2">Order Confirmed</h1>
-        <p className="text-neutral-500 mb-10">Show this code at pickup</p>
-
-        <div className="bg-white text-black text-6xl font-mono py-8 px-16 rounded-3xl mb-10 tracking-[0.3em] font-black">
-          {order.pickupCode}
-        </div>
-
-        <div className="w-full max-w-sm bg-white/5 border border-white/10 rounded-2xl p-5 mb-8">
-          {order.items?.map((item, i) => (
-            <div key={i} className="flex justify-between py-2 text-sm">
-              <span className="text-neutral-300">{item.quantity}x {item.name}</span>
-              <span className="text-neutral-400">${((item.price || 0) * item.quantity).toFixed(2)}</span>
-            </div>
-          ))}
-          <div className="border-t border-white/10 mt-3 pt-3 flex justify-between font-bold">
-            <span>Total</span>
-            <span>${order.total?.toFixed(2)}</span>
+      <MobileAppFrame>
+        <div className="flex min-h-[85vh] flex-col items-center justify-center px-6 pb-16 pt-10">
+          <div className="mb-8 flex h-20 w-20 items-center justify-center rounded-full border border-[var(--infra-green)]/35 bg-[var(--infra-green)]/15">
+            <span className="text-3xl text-[var(--infra-green)]">✓</span>
           </div>
+
+          <h1 className="mb-2 text-[26px] font-semibold tracking-tight text-[var(--infra-ink)]">Order placed</h1>
+          <p className="mb-8 text-[15px] text-[var(--infra-ink-2)]">Show this pickup code at the stall</p>
+
+          <div className="mb-8 rounded-[var(--r-xl)] bg-[var(--infra-ink)] px-10 py-8 font-mono text-[clamp(2.5rem,12vw,3.5rem)] font-black tracking-[0.2em] text-[var(--infra-black)]">
+            {order.pickupCode}
+          </div>
+
+          <div className="mb-8 w-full max-w-sm rounded-[var(--r-xl)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-1)] p-5">
+            {order.items?.map((item, i) => (
+              <div key={i} className="flex justify-between py-2 text-[14px]">
+                <span className="text-[var(--infra-ink-2)]">
+                  {item.quantity}× {item.name}
+                </span>
+                <span className="text-[var(--infra-ink-3)]">${((item.price || 0) * item.quantity).toFixed(2)}</span>
+              </div>
+            ))}
+            <div className="mt-3 flex justify-between border-t border-[var(--infra-ink-4)] pt-3 font-semibold text-[var(--infra-ink)]">
+              <span>Total</span>
+              <span>${order.total?.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <p className="mb-8 text-[14px] text-[var(--infra-ink-3)]">{vendor.name}</p>
+
+          <Link
+            href="/orders"
+            className="flex h-14 w-full max-w-sm items-center justify-center rounded-[var(--r-pill)] bg-[var(--infra-accent)] text-[17px] font-semibold text-white active:scale-[0.98]"
+          >
+            View orders
+          </Link>
+          <Link href="/search" className="mt-4 text-[15px] font-medium text-[var(--infra-blue)] underline-offset-2 hover:underline">
+            Back to search
+          </Link>
         </div>
-
-        <p className="text-sm text-neutral-600 mb-8">{vendor.name}</p>
-
-        <Link href="/search" className="w-full max-w-sm bg-white text-black py-4 rounded-2xl font-bold text-center block">
-          Done
-        </Link>
-      </main>
+      </MobileAppFrame>
     );
   }
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-white pb-28">
-      {/* Header */}
-      <header className="sticky top-0 z-20 backdrop-blur-xl bg-neutral-950/80 border-b border-white/5">
-        <div className="max-w-lg mx-auto px-5 py-4">
-          <Link href="/search" className="text-neutral-500 hover:text-white transition-colors text-sm font-medium">
-            Back
-          </Link>
-          <h1 className="text-2xl font-black mt-3">{vendor.name}</h1>
-          {vendor.businessHours && (
-            <p className="text-neutral-500 text-sm mt-1">{vendor.businessHours}</p>
-          )}
-        </div>
-      </header>
+    <MobileAppFrame>
+      <MobileNav title={vendor.name.length > 18 ? `${vendor.name.slice(0, 17)}…` : vendor.name} backHref="/search" />
 
-      {/* Menu */}
-      <div className="max-w-lg mx-auto px-5 py-6">
+      <div className="px-5 pb-36 pt-2">
+        {vendor.businessHours && (
+          <p className="mb-6 text-[14px] text-[var(--infra-ink-3)]">{vendor.businessHours}</p>
+        )}
+
         {vendor.menu && vendor.menu.length > 0 ? (
           <div className="space-y-3">
             {vendor.menu.map((item: MenuItem) => (
               <div
                 key={item.itemId}
-                className="bg-white/5 border border-white/10 rounded-2xl p-4 flex justify-between items-center"
+                className="flex items-center justify-between rounded-[var(--r-xl)] border border-[var(--infra-ink-4)] bg-[var(--infra-tile-1)] p-4"
               >
-                <div className="flex-1 pr-4">
-                  <p className="font-semibold text-white">{item.name}</p>
+                <div className="min-w-0 flex-1 pr-4">
+                  <p className="font-semibold text-[var(--infra-ink)]">{item.name}</p>
                   {item.description && (
-                    <p className="text-sm text-neutral-500 mt-1">{item.description}</p>
+                    <p className="mt-1 text-[13px] text-[var(--infra-ink-3)]">{item.description}</p>
                   )}
-                  <p className="text-green-400 font-bold mt-2">${item.price.toFixed(2)}</p>
+                  <p className="mt-2 text-[16px] font-bold text-[var(--infra-green)]">${item.price.toFixed(2)}</p>
                 </div>
 
                 {cart[item.itemId] ? (
-                  <div className="flex items-center gap-3">
+                  <div className="flex shrink-0 items-center gap-2">
                     <button
+                      type="button"
                       onClick={() => updateCart(item.itemId, -1)}
-                      className="w-10 h-10 rounded-full bg-white/10 text-white font-bold hover:bg-white/20 transition-colors"
+                      className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--infra-ink-4)] bg-[var(--infra-tile-2)] text-[var(--infra-ink)] font-bold active:scale-95"
                     >
-                      -
+                      −
                     </button>
-                    <span className="w-6 text-center font-bold">{cart[item.itemId]}</span>
+                    <span className="w-6 text-center font-bold text-[var(--infra-ink)]">{cart[item.itemId]}</span>
                     <button
+                      type="button"
                       onClick={() => updateCart(item.itemId, 1)}
-                      className="w-10 h-10 rounded-full bg-white text-black font-bold hover:bg-neutral-200 transition-colors"
+                      className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--infra-ink)] text-[var(--infra-black)] font-bold active:scale-95"
                     >
                       +
                     </button>
                   </div>
                 ) : (
                   <button
+                    type="button"
                     onClick={() => updateCart(item.itemId, 1)}
-                    className="px-6 py-2.5 bg-white text-black rounded-full font-semibold hover:bg-neutral-200 transition-colors"
+                    className="shrink-0 rounded-[var(--r-pill)] bg-[var(--infra-tile-2)] px-5 py-2.5 text-[14px] font-semibold text-[var(--infra-ink)] ring-1 ring-[var(--infra-ink-4)] active:scale-95"
                   >
                     Add
                   </button>
@@ -172,26 +183,27 @@ export default function VendorPage() {
             ))}
           </div>
         ) : (
-          <div className="text-center py-20 text-neutral-500">
-            <p className="text-lg">Menu coming soon</p>
+          <div className="py-20 text-center text-[var(--infra-ink-3)]">
+            <p className="text-[17px]">Menu coming soon</p>
           </div>
         )}
       </div>
 
-      {/* Cart */}
       {getCount() > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-neutral-950/90 backdrop-blur-xl border-t border-white/10">
-          <div className="max-w-lg mx-auto">
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-[var(--infra-ink-4)] bg-[rgba(0,0,0,0.92)] px-4 py-3 backdrop-blur-xl [padding-bottom:max(12px,env(safe-area-inset-bottom))]">
+          <div className="mx-auto w-full max-w-[430px]">
             <button
+              type="button"
               onClick={handleOrder}
               disabled={ordering}
-              className="w-full bg-white text-black py-4 rounded-2xl font-bold text-lg disabled:opacity-50 transition-opacity"
+              className="flex h-14 w-full items-center justify-center rounded-[var(--r-pill)] text-[17px] font-semibold text-white disabled:opacity-50 active:scale-[0.98]"
+              style={{ backgroundColor: "var(--infra-accent)" }}
             >
-              {ordering ? "Placing Order..." : `Order · $${getTotal().toFixed(2)}`}
+              {ordering ? "Placing order…" : `Place order · $${getTotal().toFixed(2)}`}
             </button>
           </div>
         </div>
       )}
-    </main>
+    </MobileAppFrame>
   );
 }
