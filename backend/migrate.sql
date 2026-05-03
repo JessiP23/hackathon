@@ -1,14 +1,5 @@
 -- InfraStreet — Full Schema Migration
 -- Run once against Supabase (PostGIS must be enabled)
-CREATE TABLE IF NOT EXISTS users (
-    id          TEXT PRIMARY KEY DEFAULT 'u_' || substr(md5(random()::text),1,8),
-    phone       TEXT UNIQUE NOT NULL,
-    role        TEXT DEFAULT 'customer' CHECK (role IN ('customer', 'vendor', 'admin')),
-    name        TEXT,
-    created_at  TIMESTAMPTZ DEFAULT NOW()
-);
--- InfraStreet — Full Schema Migration
--- Run once against Supabase (PostGIS must be enabled)
 
 -- Enable PostGIS
 CREATE EXTENSION IF NOT EXISTS postgis;
@@ -22,6 +13,18 @@ INSERT INTO spatial_ref_sys (srid, auth_name, auth_srid, proj4text, srtext) VALU
     '+proj=longlat +datum=WGS84 +no_defs',
     'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AXIS["Latitude",NORTH],AXIS["Longitude",EAST],AUTHORITY["EPSG","4326"]]'
 ) ON CONFLICT (srid) DO NOTHING;
+
+-- ── users (auth / app accounts; not Supabase auth.users) ─────────────────
+CREATE TABLE IF NOT EXISTS users (
+    id          TEXT PRIMARY KEY DEFAULT 'u_' || substr(md5(random()::text),1,8),
+    phone       TEXT UNIQUE NOT NULL,
+    role        TEXT DEFAULT 'customer' CHECK (role IN ('customer', 'vendor', 'admin')),
+    name        TEXT,
+    referral_code TEXT,
+    referred_by_user_id TEXT REFERENCES users(id),
+    reward_points INTEGER NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- ── vendors ───────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS vendors (
@@ -67,6 +70,7 @@ CREATE TABLE IF NOT EXISTS flash_deals (
                             CHECK (status IN ('scheduled','active','sold_out','expired','cancelled')),
     radius_miles        NUMERIC(6,2) DEFAULT 10,
     media_url           TEXT,
+    pickup_area         TEXT,
     location            geography(POINT, 4326),
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
@@ -144,10 +148,19 @@ CREATE INDEX IF NOT EXISTS notif_sent_at_idx ON notifications (sent_at);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'customer';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;
 
+-- Referrals: share link ?ref=<code>; referrer earns points when a friend completes NEW signup
+ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS users_referral_code_uidx ON users (referral_code)
+    WHERE referral_code IS NOT NULL AND referral_code <> '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by_user_id TEXT REFERENCES users(id);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reward_points INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS users_referred_by_idx ON users (referred_by_user_id);
+
 ALTER TABLE vendors ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'awaiting_menu';
 ALTER TABLE vendors ADD COLUMN IF NOT EXISTS slug TEXT UNIQUE;
 ALTER TABLE vendors ADD COLUMN IF NOT EXISTS menu_image_url TEXT;
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS radius_miles NUMERIC(6,2) DEFAULT 10;
+ALTER TABLE flash_deals ADD COLUMN IF NOT EXISTS pickup_area TEXT;
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check;
 ALTER TABLE orders ADD CONSTRAINT orders_status_check CHECK (status IN (
     'pending_payment','paid','payment_failed','expired',

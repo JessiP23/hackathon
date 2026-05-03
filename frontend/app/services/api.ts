@@ -9,8 +9,18 @@ const api = axios.create({
 });
 
 // Users
-export async function registerUser(phone: string, role: "customer" | "vendor", name?: string): Promise<User & { isExisting: boolean }> {
-  const res = await api.post("/users", { phone, role, name });
+export async function registerUser(
+  phone: string,
+  role: "customer" | "vendor",
+  name?: string,
+  referredBy?: string,
+): Promise<User & { isExisting: boolean; referralBonusApplied?: boolean }> {
+  const res = await api.post("/users", {
+    phone,
+    role,
+    name,
+    ...(referredBy ? { referredBy } : {}),
+  });
   return res.data;
 }
 
@@ -131,7 +141,7 @@ export async function getDealsNearby(lat: number, lng: number): Promise<Deal[]> 
 
 export async function placeDealOrder(
   dealId: string,
-  data: { customerPhone: string; quantity: number; customerId?: string }
+  data: { customerPhone: string; quantity: number; customerId?: string; redeemPoints?: number }
 ): Promise<Order> {
   const res = await api.post(`/deals/${dealId}/order`, data);
   return res.data;

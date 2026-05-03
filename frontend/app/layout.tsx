@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import { Inter } from "next/font/google";
 import { InAppNotificationHost } from "@/app/components/InAppNotificationHost";
+import { ReferralCapture } from "@/app/components/ReferralCapture";
 import "./globals.css";
 
 const inter = Inter({
@@ -36,6 +38,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable}>
       <body className={`${inter.className} min-h-screen antialiased`}>
+        <Suspense fallback={null}>
+          <ReferralCapture />
+        </Suspense>
         {children}
         <InAppNotificationHost />
       </body>

@@ -3,16 +3,25 @@ import os
 import random
 import string
 from app.db import SessionLocal
+from app.billing import service_fee_rate
 from sqlalchemy import text
 
 from app.services import inapp_events
 
-SERVICE_FEE_RATE = 0.13
-
 
 class OrderService:
     # ── Place order against a flash deal (with Stripe checkout) ───────
-    def place_deal_order(self, deal_id: str, customer_id: str, quantity: int, customer_phone: str) -> dict:
+    def place_deal_order(
+        self,
+        deal_id: str,
+        customer_id: str,
+        quantity: int,
+        customer_phone: str,
+        redeem_points: int = 0,
+    ) -> dict:
+        from app.services.user_service import UserService
+
+        us = UserService()
         db = SessionLocal()
         try:
             # Atomic quantity check + hold
@@ -44,8 +53,13 @@ class OrderService:
             )
 
             vendor_price = float(deal.deal_price or 0) * quantity
-            service_fee = round(vendor_price * SERVICE_FEE_RATE, 2)
-            customer_total = round(vendor_price + service_fee, 2)
+            service_fee = round(vendor_price * service_fee_rate(), 2)
+            customer_total_pre = round(vendor_price + service_fee, 2)
+            max_disc = round(customer_total_pre * 0.5, 2)
+            spent_pts, discount = us.try_redeem_with_session(
+                db, customer_phone, redeem_points, max_disc
+            )
+            customer_total = round(max(0.5, customer_total_pre - discount), 2)
             pickup_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
             result = db.execute(
@@ -64,24 +78,26 @@ class OrderService:
                     "vendor_id": deal.vendor_id,
                     "customer_phone": customer_phone,
                     "deal_id": deal_id,
-                    "items_json": json.dumps([{"name": deal.item_name, "quantity": quantity, "price": float(deal.deal_price or 0)}]),
+                    "items_json": json.dumps(
+                        [{"name": deal.item_name, "quantity": quantity, "price": float(deal.deal_price or 0)}]
+                    ),
                     "total": customer_total,
                     "service_fee": service_fee,
                     "pickup_code": pickup_code,
-                }
+                },
             )
             row = result.fetchone()
             if row is None:
                 raise RuntimeError("Failed to create order")
-            
+
             order_id = row[0]
             db.commit()
-            
+
         finally:
             db.close()
 
-        # Create Stripe checkout session
         from app.services.stripe_service import stripe_service
+
         checkout = stripe_service.create_checkout_session(
             order_id=order_id,
             deal_id=deal_id,
@@ -89,6 +105,7 @@ class OrderService:
             item_name=deal.item_name,
             quantity=quantity,
             vendor_price=vendor_price,
+            points_discount=discount,
         )
 
         return {
@@ -97,6 +114,8 @@ class OrderService:
             "pickupCode": pickup_code,
             "total": customer_total,
             "status": "pending_payment",
+            "pointsRedeemed": spent_pts,
+            "pointsDiscount": discount,
         }
 
     # ── Stripe webhook: payment succeeded ─────────────────────────────
@@ -244,6 +263,7 @@ class OrderService:
                 "vendorId": r.vendor_id,
                 "vendorName": r.vendor_name,
                 "customerPhone": r.customer_phone,
+                "dealId": getattr(r, "deal_id", None),
                 "items": items,
                 "total": float(r.total) if r.total else 0,
                 "serviceFee": sf,

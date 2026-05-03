@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { registerUser, notifyOptIn } from "@/app/services/api";
 import { getCurrentLocation } from "@/app/services/location";
+import { getStoredReferral } from "@/app/components/ReferralCapture";
 import { MobileAppFrame, MobileNav } from "@/app/components/MobileLayout";
 import { PillButton, DataCard, StatusPill } from "@/app/components/Precision";
 
@@ -102,7 +103,7 @@ export default function OnboardPage() {
     }
     setSubmitting(true);
     try {
-      await registerUser(phoneDigits, "customer");
+      await registerUser(phoneDigits, "customer", undefined, getStoredReferral());
       localStorage.setItem("infrastreet_phone", phoneDigits);
       if (alertsOptIn) {
         try {

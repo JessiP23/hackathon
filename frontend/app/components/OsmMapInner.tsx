@@ -22,6 +22,16 @@ function pinIcon(highlighted: boolean): L.DivIcon {
   });
 }
 
+function mapAlive(m: L.Map | null): m is L.Map {
+  if (!m) return false;
+  try {
+    const c = m.getContainer();
+    return Boolean(c?.isConnected);
+  } catch {
+    return false;
+  }
+}
+
 type Props = {
   userLocation: Location | null;
   vendors: Vendor[];
@@ -45,15 +55,24 @@ export default function OsmMapInner({
 
   useEffect(() => {
     return () => {
-      mapRef.current?.remove();
+      try {
+        mapRef.current?.remove();
+      } catch {
+        /* map already removed */
+      }
       mapRef.current = null;
       layerRef.current = null;
     };
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    let raf0 = 0;
+    let raf1 = 0;
+
     const el = containerRef.current;
-    if (!el) return;
+    if (!el?.isConnected) return;
+
     const center = initialCenter(userLocation, vendors);
     if (!center) return;
 
@@ -72,14 +91,34 @@ export default function OsmMapInner({
 
       layerRef.current = L.layerGroup().addTo(map);
       mapRef.current = map;
-      requestAnimationFrame(() => {
-        map.invalidateSize();
+      raf0 = requestAnimationFrame(() => {
+        if (!cancelled && mapAlive(mapRef.current)) {
+          try {
+            mapRef.current.invalidateSize();
+          } catch {
+            /* ignore */
+          }
+        }
       });
     }
 
-    const map = mapRef.current!;
-    const lg = layerRef.current!;
-    lg.clearLayers();
+    const map = mapRef.current;
+    const lg = layerRef.current;
+    if (!mapAlive(map) || !lg) return;
+
+    try {
+      map.stop();
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      lg.clearLayers();
+    } catch {
+      if (cancelled) return;
+    }
+
+    if (cancelled || !mapAlive(map)) return;
 
     const latlngs: L.LatLngExpression[] = [];
 
@@ -114,17 +153,35 @@ export default function OsmMapInner({
     });
 
     if (latlngs.length === 0) return;
+    if (cancelled || !mapAlive(map)) return;
 
-    if (latlngs.length === 1) {
-      map.setView(latlngs[0] as L.LatLngTuple, 15);
-    } else {
-      map.fitBounds(L.latLngBounds(latlngs as L.LatLngTuple[]), {
-        padding: [28, 28],
-        maxZoom: 16,
-      });
+    try {
+      if (latlngs.length === 1) {
+        map.setView(latlngs[0] as L.LatLngTuple, 15);
+      } else {
+        map.fitBounds(L.latLngBounds(latlngs as L.LatLngTuple[]), {
+          padding: [28, 28],
+          maxZoom: 16,
+        });
+      }
+    } catch {
+      /* Leaflet occasionally throws if the map is resizing mid-update */
     }
 
-    requestAnimationFrame(() => map.invalidateSize());
+    raf1 = requestAnimationFrame(() => {
+      if (cancelled || !mapAlive(mapRef.current)) return;
+      try {
+        mapRef.current!.invalidateSize({ animate: false });
+      } catch {
+        /* ignore */
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf0);
+      cancelAnimationFrame(raf1);
+    };
   }, [userLocation, vendors, highlightedVendorId]);
 
   return (

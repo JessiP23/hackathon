@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getCurrentLocation } from "@/app/services/location";
-import { getDealsNearby, placeDealOrder, notifyOptIn } from "@/app/services/api";
+import { getDealsNearby, placeDealOrder, notifyOptIn, getUserByPhone } from "@/app/services/api";
 import { Deal, Location } from "@/app/shared/types";
 import DealTile from "@/app/components/DealTile";
 import { MobileAppFrame } from "@/app/components/MobileLayout";
@@ -22,9 +22,19 @@ export default function DealsPage() {
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [notifyMsg, setNotifyMsg] = useState<string | null>(null);
   const [showDemoBanner, setShowDemoBanner] = useState(false);
+  const [pointsBalance, setPointsBalance] = useState(0);
+  const [applyFoodPoints, setApplyFoodPoints] = useState(true);
 
   useEffect(() => {
     setShowDemoBanner(isDemoBrowse() && !localStorage.getItem("infrastreet_phone"));
+  }, []);
+
+  useEffect(() => {
+    const phone = localStorage.getItem("infrastreet_phone");
+    if (!phone) return;
+    void getUserByPhone(phone).then((u) => {
+      if (u?.rewardPoints != null) setPointsBalance(u.rewardPoints);
+    });
   }, []);
 
   useEffect(() => {
@@ -47,6 +57,8 @@ export default function DealsPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const FEE = 0.15;
+
   const handleReserve = useCallback(
     async (deal: Deal) => {
       const phone = localStorage.getItem("infrastreet_phone");
@@ -60,7 +72,20 @@ export default function DealsPage() {
       }
       setOrdering(deal.dealId);
       try {
-        const order = await placeDealOrder(deal.dealId, { customerPhone: phone, quantity: 1 });
+        const qty = 1;
+        const vendorSubtotal = deal.dealPrice * qty;
+        const preTotal = Math.round(vendorSubtotal * (1 + FEE) * 100) / 100;
+        const maxCents = Math.floor(preTotal * 0.5 * 100);
+        const redeemPoints =
+          applyFoodPoints && pointsBalance > 0 ? Math.min(pointsBalance, maxCents) : 0;
+        const order = await placeDealOrder(deal.dealId, {
+          customerPhone: phone,
+          quantity: qty,
+          redeemPoints,
+        });
+        void getUserByPhone(phone).then((u) => {
+          if (u?.rewardPoints != null) setPointsBalance(u.rewardPoints);
+        });
         if (order.checkoutUrl) {
           try {
             sessionStorage.setItem(
@@ -81,7 +106,7 @@ export default function DealsPage() {
         setOrdering(null);
       }
     },
-    [router],
+    [router, applyFoodPoints, pointsBalance],
   );
 
   function getTimeLeft(expiresAt: string) {
@@ -204,6 +229,20 @@ export default function DealsPage() {
               Orders
             </Link>
           </div>
+          {pointsBalance > 0 ? (
+            <label className="pointer-events-auto mx-5 mt-1 mb-2 flex cursor-pointer items-center gap-3 rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-3 py-2.5">
+              <input
+                type="checkbox"
+                className="size-4 accent-[var(--is-purple)]"
+                checked={applyFoodPoints}
+                onChange={(e) => setApplyFoodPoints(e.target.checked)}
+              />
+              <span className="text-left text-[12px] leading-snug text-[var(--is-text-2)]">
+                Use food points on checkout (balance{" "}
+                <strong className="text-[var(--is-text-1)]">{pointsBalance}</strong> pts · up to half the order)
+              </span>
+            </label>
+          ) : null}
         </header>
 
         {loading && (

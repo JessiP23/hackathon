@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { getUserByPhone } from "./services/api";
 import { User } from "./shared/types";
 import { MobileAppFrame } from "./components/MobileLayout";
 import { setDemoBrowse } from "./lib/demo";
-import { PillLink, MetricCard } from "./components/Precision";
+import { PillLink, MetricCard, DataCard, PillButton } from "./components/Precision";
 
 export default function LandingPage() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     async function loadUser() {
@@ -25,6 +26,22 @@ export default function LandingPage() {
     }
     void loadUser();
   }, []);
+
+  const shareUrl =
+    typeof window !== "undefined" && user?.referralCode
+      ? `${window.location.origin}/onboard?ref=${encodeURIComponent(user.referralCode)}`
+      : "";
+
+  const copyShare = useCallback(async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2200);
+    } catch {
+      /* ignore */
+    }
+  }, [shareUrl]);
 
   if (loading) {
     return (
@@ -67,6 +84,25 @@ export default function LandingPage() {
               My orders
             </Link>
           </div>
+
+          {user.referralCode ? (
+            <DataCard>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--is-text-4)]">
+                Invite friends · earn food points
+              </p>
+              <p className="mt-2 text-[14px] leading-snug text-[var(--is-text-2)]">
+                When they finish signup, you both get points. Spend points on flash deals (up to half the order).
+              </p>
+              {user.rewardPoints != null ? (
+                <p className="mt-3 text-[22px] font-bold tracking-[-0.03em] text-[var(--is-text-1)]">
+                  {user.rewardPoints} <span className="text-[14px] font-semibold text-[var(--is-text-3)]">pts</span>
+                </p>
+              ) : null}
+              <PillButton type="button" variant="ghost" className="mt-4 w-full" onClick={() => void copyShare()}>
+                {copied ? "Copied link" : "Copy invite link"}
+              </PillButton>
+            </DataCard>
+          ) : null}
 
           <button
             type="button"

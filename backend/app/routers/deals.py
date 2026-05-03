@@ -13,6 +13,7 @@ class DealOrderRequest(BaseModel):
     customerId: str = ""
     customerPhone: str
     quantity: int = 1
+    redeemPoints: int = 0
 
 
 @router.post("")
@@ -43,4 +44,5 @@ def place_deal_order(deal_id: str, payload: DealOrderRequest):
         customer_id=payload.customerId,
         quantity=payload.quantity,
         customer_phone=payload.customerPhone,
+        redeem_points=max(0, int(payload.redeemPoints or 0)),
     )

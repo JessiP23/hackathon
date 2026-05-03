@@ -12,8 +12,9 @@ try:
 except ImportError:
     STRIPE_OK = False
 
+from app.billing import service_fee_rate
+
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-SERVICE_FEE_RATE = 0.13
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 
@@ -26,13 +27,15 @@ class StripeService:
         item_name: str,
         quantity: int,
         vendor_price: float,
+        points_discount: float = 0.0,
     ) -> dict:
         """Create a Stripe Checkout session. Returns {checkout_url, session_id}."""
         if not STRIPE_OK:
             return {"checkout_url": None, "session_id": None, "error": "Stripe not configured"}
 
-        service_fee = round(vendor_price * SERVICE_FEE_RATE, 2)
-        customer_total = round(vendor_price + service_fee, 2)
+        service_fee = round(vendor_price * service_fee_rate(), 2)
+        raw_total = round(vendor_price + service_fee - max(0.0, float(points_discount or 0)), 2)
+        customer_total = max(0.5, raw_total)
 
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],

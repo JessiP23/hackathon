@@ -1,7 +1,9 @@
 -- InfraStreet — Demo: 10 NYC vendors + 30 active flash deals (Brooklyn / Queens / Manhattan)
--- Run in Supabase SQL editor after migrate.sql. Safe to re-run after deleting seed rows (see bottom).
+-- Run in Supabase SQL editor after migrate.sql.
 --
--- Update media_url later with your Supabase Storage public URLs for food photos.
+-- Extra NYC data: run seed_nyc_100_more.sql (+25 vendors, +100 deals) or:
+--   python3 scripts/generate_nyc_seed_100.py
+-- (Generated seed keeps media_url NULL; add your own URLs later if you want photos.)
 -- Phones are dummy E.164 (+1 718/212/347…) for demo rows only.
 
 BEGIN;

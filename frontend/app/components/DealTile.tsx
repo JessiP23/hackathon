@@ -113,6 +113,11 @@ export default function DealTile({ deal, stackIndex, onReserve, onSwipeNext, isT
 
   const price = deal.dealPrice?.toFixed(0) ?? "—";
 
+  const mapsUrl =
+    deal.lat != null && deal.lng != null
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${deal.lat},${deal.lng}`)}`
+      : null;
+
   return (
     <motion.div
       className="absolute inset-0 flex flex-col justify-end overflow-hidden bg-[var(--is-bg)]"
@@ -186,9 +191,31 @@ export default function DealTile({ deal, stackIndex, onReserve, onSwipeNext, isT
         </div>
 
         <p className="text-[15px] tracking-[-0.01em] text-[var(--is-text-2)]">
-          {deal.vendorName ?? "Vendor"} ·{" "}
+          {deal.vendorName ?? "Vendor"}
+          {deal.pickupArea ? (
+            <>
+              {" · "}
+              <span className="font-medium text-[var(--is-text-1)]">{deal.pickupArea}</span>
+            </>
+          ) : null}
+        </p>
+        <p className="mt-1 text-[13px] text-[var(--is-text-3)]">
           <span className="[font-variant-numeric:tabular-nums]">{walkM < 1000 ? `${walkM}m` : `${(walkM / 1000).toFixed(1)}km`}</span>{" "}
           away
+          {mapsUrl ? (
+            <>
+              {" · "}
+              <a
+                href={mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-[var(--is-blue)] underline decoration-[var(--is-blue)] underline-offset-2"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Directions
+              </a>
+            </>
+          ) : null}
         </p>
 
         <div className="mt-3">

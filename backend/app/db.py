@@ -49,10 +49,12 @@ def get_engine():
     """Engine is created on first use — importing this module does not connect to Postgres."""
     url = get_database_url()
     _log_pooler_user_once(url)
-    connect_args: dict = {}
+    # psycopg3: prepare_threshold=None disables server-side prepare (required for
+    # PgBouncer / Supabase transaction pooler). Do NOT use 0 — that means "prepare
+    # immediately on first exec" and triggers DuplicatePreparedStatement on the pooler.
+    connect_args: dict = {"prepare_threshold": None}
     if "pooler.supabase.com" in url:
         connect_args["options"] = "-c search_path=public"
-        connect_args["prepare_threshold"] = 0
         connect_args["sslmode"] = "require"
     return create_engine(
         url,

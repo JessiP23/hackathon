@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { registerUser, createVendor, uploadMenu } from "@/app/services/api";
 import { getCurrentLocation } from "@/app/services/location";
+import { getStoredReferral } from "@/app/components/ReferralCapture";
 import { MobileAppFrame, MobileNav } from "@/app/components/MobileLayout";
 
 export default function VendorOnboardingPage() {
@@ -42,7 +43,7 @@ export default function VendorOnboardingPage() {
 
     setLoading(true);
     try {
-      const user = await registerUser(phoneDigits, "vendor", businessName);
+      const user = await registerUser(phoneDigits, "vendor", businessName, getStoredReferral());
       localStorage.setItem("infrastreet_phone", phoneDigits);
       localStorage.setItem("infrastreet_user", JSON.stringify(user));
 

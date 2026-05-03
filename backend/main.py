@@ -10,13 +10,23 @@ from app.routers.short_link import router as short_link_router
 
 app = FastAPI(title="InfraStreet API")
 
-origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+# Browsers send OPTIONS preflight before POST /users. If the frontend Origin is not allowed
+# below, Starlette returns 400 "Disallowed CORS origin" and Safari shows a failed request.
+_raw = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+origins = [o.strip() for o in _raw.split(",") if o.strip()]
+if not origins:
+    origins = ["http://localhost:3000"]
+_origin_regex = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
+
 app.add_middleware(
-	CORSMiddleware,
-	allow_origins=[o.strip() for o in origins if o.strip()],
-	allow_credentials=True,
-	allow_methods=["*"],
-	allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_origin_regex=_origin_regex,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=86400,
 )
 
 app.include_router(user.router, prefix="/users", tags=["users"])

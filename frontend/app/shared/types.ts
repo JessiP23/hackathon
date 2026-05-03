@@ -8,6 +8,10 @@ export interface User {
   phone: string;
   role: "customer" | "vendor";
   name?: string;
+  /** 1 point = 1¢ off food (capped per order). */
+  rewardPoints?: number;
+  referralCode?: string;
+  referralBonusApplied?: boolean;
 }
 
 export interface MenuItem {
@@ -43,6 +47,10 @@ export interface Deal {
   distance_m?: number;
   distanceMiles?: number;
   mediaUrl?: string;
+  /** Human place label, e.g. "Astoria, Queens" */
+  pickupArea?: string;
+  lat?: number;
+  lng?: number;
   reliabilityScore?: number;
   rankScore?: number;
 }
@@ -52,7 +60,7 @@ export interface Order {
   vendorId: string;
   vendorName?: string;
   customerPhone?: string;
-  dealId?: string;
+  dealId?: string | null;
   status: string;
   items: { name: string; quantity: number; price?: number }[];
   total?: number;

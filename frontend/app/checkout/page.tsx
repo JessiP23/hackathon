@@ -44,8 +44,21 @@ function CheckoutInner() {
   }
 
   const total = order?.total ?? 0;
-  const subtotal = order ? Math.max(0, total * (17 / 18)) : 0;
-  const fees = order ? Math.max(0, total - subtotal) : 0;
+  const subtotal = order
+    ? Math.round(
+        order.items.reduce((s, i) => s + (i.price ?? 0) * i.quantity, 0) * 100
+      ) / 100
+    : 0;
+  const platformFee =
+    order && order.serviceFee != null && order.serviceFee !== undefined
+      ? order.serviceFee
+      : order
+        ? Math.round(Math.max(0, total - subtotal) * 100) / 100
+        : 0;
+  const rewardsOff =
+    order
+      ? Math.round(Math.max(0, subtotal + platformFee - total) * 100) / 100
+      : 0;
 
   if (order === undefined) {
     return (
@@ -120,13 +133,19 @@ function CheckoutInner() {
 
       <div className="mb-4 space-y-2 text-[13px] text-[var(--is-text-2)]">
         <div className="flex justify-between">
-          <span>Subtotal</span>
+          <span>Food subtotal</span>
           <span className="[font-variant-numeric:tabular-nums]">${subtotal.toFixed(2)}</span>
         </div>
         <div className="flex justify-between">
-          <span>Fee + tax</span>
-          <span className="[font-variant-numeric:tabular-nums]">${fees.toFixed(2)}</span>
+          <span>Platform fee (15%)</span>
+          <span className="[font-variant-numeric:tabular-nums]">${platformFee.toFixed(2)}</span>
         </div>
+        {rewardsOff > 0 ? (
+          <div className="flex justify-between text-[var(--is-green)]">
+            <span>Rewards</span>
+            <span className="[font-variant-numeric:tabular-nums]">−${rewardsOff.toFixed(2)}</span>
+          </div>
+        ) : null}
       </div>
       <DividerLine />
       <div className="mb-8 flex justify-between pt-2">

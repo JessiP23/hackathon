@@ -6,7 +6,7 @@ import asyncio
 
 class DealService:
     # ── Customer-facing: ranked nearby deals ───────────────────────────
-    def get_deals_nearby(self, lat: float, lng: float, limit: int = 20):
+    def get_deals_nearby(self, lat: float, lng: float, limit: int = 120):
         db = SessionLocal()
         try:
             deals = db.execute(
@@ -15,6 +15,9 @@ class DealService:
                         d.id as deal_id, d.vendor_id, d.item_name,
                         d.original_price, d.deal_price, d.discount_pct,
                         d.remaining_quantity, d.end_at, d.status, d.media_url,
+                        d.pickup_area,
+                        ST_Y(d.location::geometry) as deal_lat,
+                        ST_X(d.location::geometry) as deal_lng,
                         v.name as vendor_name, v.reliability_score,
                         ST_Distance(d.location, ST_SetSRID(ST_MakePoint(:lng,:lat),4326)::geography) as distance_m
                     FROM flash_deals d
@@ -48,6 +51,9 @@ class DealService:
                     "distance_m": int(d.distance_m or 0),
                     "distanceMiles": round(dist_miles, 1),
                     "mediaUrl": d.media_url,
+                    "pickupArea": getattr(d, "pickup_area", None) or None,
+                    "lat": float(d.deal_lat) if getattr(d, "deal_lat", None) is not None else None,
+                    "lng": float(d.deal_lng) if getattr(d, "deal_lng", None) is not None else None,
                     "reliabilityScore": reliability,
                     "rankScore": round(score, 4),
                 })
@@ -57,7 +63,7 @@ class DealService:
             db.close()
 
     # Alias used by older router
-    def find_nearby(self, lat: float, lng: float, limit: int = 20):
+    def find_nearby(self, lat: float, lng: float, limit: int = 120):
         return self.get_deals_nearby(lat, lng, limit)
 
     # ── Flash deal creation (full lifecycle) ───────────────────────────

@@ -149,13 +149,20 @@ export default function OrderDetailPage() {
   }
 
   const kind = orderStatusKind(order.status);
+  const rawItemSum = order.items.reduce((s, i) => s + (i.price ?? 0) * i.quantity, 0);
   const subtotal =
-    order.items.reduce((s, i) => s + (i.price ?? 0) * i.quantity, 0) ||
-    Math.round(((order.total ?? 0) / 1.13) * 100) / 100;
+    rawItemSum > 0
+      ? Math.round(rawItemSum * 100) / 100
+      : Math.round((order.total ?? 0) * 100) / 100;
   const platformFee =
-    order.serviceFee ?? Math.round(Math.max(0, (order.total ?? 0) - subtotal) * 100) / 100;
-  const tax = Math.max(0, (order.total ?? subtotal + platformFee) - subtotal - platformFee);
-  const total = order.total ?? subtotal + platformFee + tax;
+    order.serviceFee != null && order.serviceFee !== undefined
+      ? order.serviceFee
+      : rawItemSum > 0
+        ? Math.round(Math.max(0, (order.total ?? 0) - subtotal) * 100) / 100
+        : 0;
+  const rewardsOff =
+    Math.round(Math.max(0, subtotal + platformFee - (order.total ?? 0)) * 100) / 100;
+  const total = order.total ?? Math.max(0, subtotal + platformFee - rewardsOff);
 
   return (
     <MobileAppFrame>
@@ -225,13 +232,15 @@ export default function OrderDetailPage() {
             <span className="[font-variant-numeric:tabular-nums]">${subtotal.toFixed(2)}</span>
           </div>
           <div className="flex justify-between text-[var(--is-text-2)]">
-            <span>Platform fee</span>
+            <span>Platform fee (15%)</span>
             <span className="[font-variant-numeric:tabular-nums]">${platformFee.toFixed(2)}</span>
           </div>
-          <div className="flex justify-between text-[var(--is-text-2)]">
-            <span>Tax</span>
-            <span className="[font-variant-numeric:tabular-nums]">${tax.toFixed(2)}</span>
-          </div>
+          {rewardsOff > 0 ? (
+            <div className="flex justify-between text-[var(--is-green)]">
+              <span>Rewards</span>
+              <span className="[font-variant-numeric:tabular-nums]">−${rewardsOff.toFixed(2)}</span>
+            </div>
+          ) : null}
         </div>
         <DividerLine />
         <div className="flex items-baseline justify-between pt-1">
