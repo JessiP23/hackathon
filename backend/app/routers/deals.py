@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel
 from app.schemas.deal import DealCreate
 from app.services.deal_service import DealService
@@ -39,10 +39,13 @@ def get_nearby_deals(
 
 @router.post("/{deal_id}/order")
 def place_deal_order(deal_id: str, payload: DealOrderRequest):
-    return order_svc.place_deal_order(
+    body = order_svc.place_deal_order(
         deal_id=deal_id,
         customer_id=payload.customerId,
         quantity=payload.quantity,
         customer_phone=payload.customerPhone,
         redeem_points=max(0, int(payload.redeemPoints or 0)),
     )
+    if isinstance(body, dict) and body.get("error"):
+        raise HTTPException(status_code=400, detail=body["error"])
+    return body

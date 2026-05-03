@@ -34,6 +34,8 @@ ONBOARD_MENU_PHOTO = "ONBOARD_MENU_PHOTO"
 ONBOARD_MENU_CONFIRM = "ONBOARD_MENU_CONFIRM"
 ONBOARD_BRAIN_OPT_IN = "ONBOARD_BRAIN_OPT_IN"
 ONBOARD_BRAIN_PRICE_FLOOR = "ONBOARD_BRAIN_PRICE_FLOOR"
+ONBOARD_PAYOUT_CARD = "ONBOARD_PAYOUT_CARD"
+PAYOUT_CARD_UPDATE = "PAYOUT_CARD_UPDATE"
 
 DEAL_ITEM = "DEAL_ITEM"
 DEAL_QUANTITY = "DEAL_QUANTITY"
@@ -123,8 +125,57 @@ def clear_state(phone: str) -> None:
     _kv_del(f"state:{phone}")
 
 
+def _first_slash_command(text_body: str) -> str | None:
+    """First word if it's a /command; strip @Bot suffix (Telegram deep links)."""
+    parts = (text_body or "").strip().split()
+    if not parts:
+        return None
+    w = parts[0].lower()
+    if not w.startswith("/"):
+        return None
+    if "@" in w:
+        w = w.split("@", 1)[0]
+    return w
+
+
 def _clear_pending_deal(vendor_id: str) -> None:
     _kv_del(f"pending_deal:{vendor_id}")
+
+
+def _purge_vendor_from_db(vendor_id: str) -> None:
+    """Remove vendor and blocking FK rows (orders are not ON DELETE CASCADE)."""
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                "DELETE FROM trust_events WHERE order_id IN "
+                "(SELECT id FROM orders WHERE vendor_id = :vid)"
+            ),
+            {"vid": vendor_id},
+        )
+        db.execute(text("DELETE FROM vendor_payouts WHERE vendor_id = :vid"), {"vid": vendor_id})
+        db.execute(
+            text(
+                "DELETE FROM notifications WHERE vendor_id = :vid "
+                "OR deal_id IN (SELECT id FROM flash_deals WHERE vendor_id = :vid)"
+            ),
+            {"vid": vendor_id},
+        )
+        db.execute(text("DELETE FROM orders WHERE vendor_id = :vid"), {"vid": vendor_id})
+        db.execute(text("DELETE FROM vendors WHERE id = :vid"), {"vid": vendor_id})
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _clear_telegram_vendor_keys(phone: str, vendor_id: str | None) -> None:
+    clear_state(phone)
+    if vendor_id:
+        _clear_pending_deal(vendor_id)
+        _kv_del(f"brain_last:{vendor_id}")
 
 
 def _get_pending_deal(vendor_id: str) -> dict | None:
@@ -291,6 +342,7 @@ def _help_text() -> str:
         "/stopdeal — stop your active deal\n"
         "/status — today's summary\n"
         "/cancel — cancel the current step\n"
+        "/reset — delete your stall from InfraStreet and start over (/start)\n"
         "/help — this message"
     )
 
@@ -532,11 +584,11 @@ async def _onboard_brain_opt_in(phone: str, yn: bool) -> str:
         db.close()
 
     if not yn:
-        return await _finalize_onboarding(phone, vid, brain_on=False)
+        return await _begin_payout_card_step(phone, vid, brain_on=False)
 
     menus = _list_menus(vid)
     if not menus:
-        return await _finalize_onboarding(phone, vid, brain_on=True)
+        return await _begin_payout_card_step(phone, vid, brain_on=True)
 
     d = {"vendor_id": vid, "brain_floor_items": menus, "brain_floor_idx": 0}
     _set_state(phone, ONBOARD_BRAIN_PRICE_FLOOR, d)
@@ -551,7 +603,7 @@ async def _onboard_brain_floor_reply(phone: str, text_body: str) -> str:
     vid = data.get("vendor_id")
     if not vid or idx >= len(items):
         if vid:
-            return await _finalize_onboarding(phone, vid, brain_on=True)
+            return await _begin_payout_card_step(phone, vid, brain_on=True)
         return _interrupt_message()
 
     row = items[idx]
@@ -579,7 +631,7 @@ async def _onboard_brain_floor_reply(phone: str, text_body: str) -> str:
 
     next_idx = idx + 1
     if next_idx >= len(items):
-        return await _finalize_onboarding(phone, vid, brain_on=True)
+        return await _begin_payout_card_step(phone, vid, brain_on=True)
 
     nxt = items[next_idx]
     _set_state(
@@ -590,7 +642,64 @@ async def _onboard_brain_floor_reply(phone: str, text_body: str) -> str:
     return _brain_floor_prompt(nxt["item_name"], first_message=False)
 
 
-async def _finalize_onboarding(phone: str, vendor_id: str, brain_on: bool) -> str:
+def _validate_card_number(text: str) -> bool:
+    digits = text.replace(" ", "").replace("-", "")
+    return digits.isdigit() and len(digits) == 16
+
+
+async def _begin_payout_card_step(phone: str, vendor_id: str, brain_on: bool) -> str:
+    _set_state(phone, ONBOARD_PAYOUT_CARD, {"vendor_id": vendor_id, "brain_on": brain_on})
+    return (
+        "Almost done.\n\n"
+        "To receive your payments, I need your debit card number.\n\n"
+        "Your earnings go directly to this card after each pickup.\n"
+        "Reply with just the 16-digit number.\n\n"
+        "In Stripe test mode use debit: 4000056655665556\n\n"
+        "Reply SKIP to set this up later (you won't be paid until you add a card)."
+    )
+
+
+async def _resume_incomplete_onboarding(phone: str, vendor: dict) -> str:
+    """Continue setup when status is not active (e.g. Redis TTL expired, or /deal before live)."""
+    vid = vendor["id"]
+    menus = _list_menus(vid)
+    if not menus:
+        _set_state(
+            phone,
+            ONBOARD_MENU_PHOTO,
+            {
+                "vendor_id": vid,
+                "stall_name": (vendor.get("name") or "").strip(),
+                "neighborhood": (vendor.get("neighborhood") or "").strip(),
+            },
+        )
+        return (
+            "You're not live yet — your stall still needs a menu on file.\n\n"
+            "Send a clear photo of your menu or price list (chalkboard, printout, or handwritten list)."
+        )
+
+    brain_on = bool(vendor.get("brain_enabled"))
+    if brain_on:
+        missing = [m for m in menus if m.get("price_floor") is None]
+        if missing:
+            _set_state(
+                phone,
+                ONBOARD_BRAIN_PRICE_FLOOR,
+                {"vendor_id": vid, "brain_floor_items": missing, "brain_floor_idx": 0},
+            )
+            return _brain_floor_prompt(missing[0]["item_name"], first_message=True)
+        return await _begin_payout_card_step(phone, vid, brain_on=True)
+
+    _set_state(phone, ONBOARD_BRAIN_OPT_IN, {"vendor_id": vid})
+    return _onboard_brain_opt_in_prompt()
+
+
+async def _finalize_onboarding(
+    phone: str,
+    vendor_id: str,
+    brain_on: bool,
+    payout_skipped: bool = False,
+) -> str:
     neighborhood = ""
     db = SessionLocal()
     try:
@@ -625,6 +734,11 @@ async def _finalize_onboarding(phone: str, vendor_id: str, brain_on: bool) -> st
         print(f"[VendorFSM] fan_out_new_vendor: {e}", flush=True)
 
     hood = neighborhood or "your area"
+    skip_note = (
+        "\n\n⚠️ Payout card not set. Send /payout to add it anytime."
+        if payout_skipped
+        else ""
+    )
     if brain_on:
         return (
             "🎉 You're live on InfraStreet.\n\n"
@@ -635,6 +749,7 @@ async def _finalize_onboarding(phone: str, vendor_id: str, brain_on: bool) -> st
             "When it fires a deal, I'll send you a message so you know.\n\n"
             "To launch a deal manually anytime, send: /deal\n"
             "To check your Brain: /brain"
+            f"{skip_note}"
         )
     return (
         "🎉 You're live on InfraStreet.\n\n"
@@ -642,7 +757,106 @@ async def _finalize_onboarding(phone: str, vendor_id: str, brain_on: bool) -> st
         f"🍽 {n} items on your menu\n\n"
         "To launch a flash deal, send: /deal\n"
         "To turn on the Brain later, send: /brain on"
+        f"{skip_note}"
     )
+
+
+async def _handle_payout_card_reply(
+    phone: str,
+    text_body: str,
+    updating: bool,
+) -> str:
+    raw = (text_body or "").strip()
+    low = raw.lower()
+
+    st = get_state(phone) or {}
+    data = st.get("data") or {}
+    vendor_id = data.get("vendor_id")
+    brain_on = bool(data.get("brain_on", False))
+
+    if not vendor_id:
+        clear_state(phone)
+        return _interrupt_message()
+
+    if updating and low in ("cancel", "/cancel"):
+        clear_state(phone)
+        return "Cancelled. Send /payout when you're ready."
+
+    if low == "skip" and not updating:
+        db = SessionLocal()
+        try:
+            db.execute(
+                text("UPDATE vendors SET payout_enabled = false WHERE id = :vid"),
+                {"vid": vendor_id},
+            )
+            db.commit()
+        finally:
+            db.close()
+        return await _finalize_onboarding(phone, vendor_id, brain_on, payout_skipped=True)
+
+    if not _validate_card_number(raw):
+        return (
+            "That doesn't look right — enter the 16 digits on the front of your card.\n"
+            "In test mode try: 4000056655665556"
+            + (
+                "\n\nOr reply SKIP to set this up later."
+                if not updating
+                else ""
+            )
+        )
+
+    digits = raw.replace(" ", "").replace("-", "")
+    try:
+        from app.services.stripe_connect import create_vendor_connect_account
+
+        info = create_vendor_connect_account(vendor_id, digits)
+    except Exception as e:
+        print(f"[VendorFSM] Connect card error: {e}", flush=True)
+        return (
+            "There was a problem with that card. Try a different debit card number, or reply SKIP to set this up later.\n\n"
+            "(You won't be able to receive payments until this is done.)"
+        )
+
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE vendors
+                SET stripe_account_id = :aid,
+                    stripe_account_status = :st,
+                    payout_enabled = :pe,
+                    stripe_debit_card_last4 = :l4
+                WHERE id = :vid
+                """
+            ),
+            {
+                "aid": info["stripe_account_id"],
+                "st": info.get("stripe_account_status") or "active",
+                "pe": True,
+                "l4": info.get("stripe_debit_card_last4") or digits[-4:],
+                "vid": vendor_id,
+            },
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    if updating:
+        clear_state(phone)
+        return (
+            "✅ Payout card saved.\n\n"
+            "Earnings from each order go to your card within minutes of pickup confirmation.\n\n"
+            "You keep 85% of every sale. InfraStreet takes 15%."
+        )
+
+    payout_lines = (
+        "✅ Payout card saved.\n\n"
+        "Earnings from each order go to your card within minutes of pickup confirmation.\n\n"
+        "You keep 85% of every sale. InfraStreet takes 15%.\n\n"
+    )
+    rest = await _finalize_onboarding(phone, vendor_id, brain_on, payout_skipped=False)
+    return payout_lines + rest
 
 
 def _deal_item_prompt(vendor_id: str) -> str | None:
@@ -1216,6 +1430,23 @@ async def handle_vendor_message(
     if low in ("/help", "help"):
         return _help_text()
 
+    if _first_slash_command(text_body) == "/reset":
+        vid = vendor["id"] if vendor else None
+        if vid:
+            try:
+                _purge_vendor_from_db(vid)
+            except Exception as e:
+                print(f"[VendorFSM] /reset DB purge failed: {e}", flush=True)
+                return (
+                    "Could not remove your stall from the database. "
+                    "Check logs or try again in a moment."
+                )
+        _clear_telegram_vendor_keys(phone, vid)
+        return (
+            "Done — your stall was removed from InfraStreet.\n\n"
+            "Send /start to register a new stall from scratch."
+        )
+
     if low in ("/cancel", "cancel"):
         if vendor:
             _clear_pending_deal(vendor["id"])
@@ -1234,6 +1465,14 @@ async def handle_vendor_message(
     if vendor and low.startswith("/brain"):
         tokens = [t.lstrip("/") for t in text_body.strip().split()]
         return await _brain_command(phone, vendor, tokens)
+
+    if vendor and vendor.get("status") == "active" and low.startswith("/payout"):
+        _set_state(phone, PAYOUT_CARD_UPDATE, {"vendor_id": vendor["id"], "brain_on": False})
+        return (
+            "Send your debit card number to receive earnings.\n\n"
+            "Reply with the 16-digit number.\n\n"
+            "(Test: 4000056655665556 — send /cancel from this chat to abort.)"
+        )
 
     if vendor and vendor.get("status") == "active" and low.startswith("/price"):
         clear_state(phone)
@@ -1318,6 +1557,13 @@ async def handle_vendor_message(
             return await _onboard_brain_opt_in(phone, yn)
         if step == ONBOARD_BRAIN_PRICE_FLOOR:
             return await _onboard_brain_floor_reply(phone, text_body)
+        if step == ONBOARD_PAYOUT_CARD:
+            return await _handle_payout_card_reply(phone, text_body, updating=False)
+
+    if vendor.get("status") != "active" and (
+        low.startswith("/deal") or low in ("/flash", "flash")
+    ):
+        return await _resume_incomplete_onboarding(phone, vendor)
 
     if vendor.get("status") == "active" and (image_bytes or media_url):
         if step not in (ONBOARD_MENU_PHOTO,):
@@ -1328,6 +1574,9 @@ async def handle_vendor_message(
 
     if step == BRAIN_ENABLE_FLOORS:
         return await _brain_enable_floor_reply(phone, text_body, vendor)
+
+    if step == PAYOUT_CARD_UPDATE:
+        return await _handle_payout_card_reply(phone, text_body, updating=True)
 
     if step == DEAL_ITEM:
         if not text_body.strip():
@@ -1360,6 +1609,8 @@ async def handle_vendor_message(
         return await _price_confirm(phone, yn, vendor)
 
     if low in ("/start",):
+        if vendor.get("status") != "active":
+            return await _resume_incomplete_onboarding(phone, vendor)
         return (
             "You're on InfraStreet. Send /deal for a flash deal, /brain for the Brain, /help for commands."
         )

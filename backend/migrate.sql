@@ -190,3 +190,67 @@ ALTER TABLE flash_deals ADD COLUMN IF NOT EXISTS vendor_end_notified_at TIMESTAM
 ALTER TABLE flash_deals DROP CONSTRAINT IF EXISTS flash_deals_deal_origin_check;
 ALTER TABLE flash_deals ADD CONSTRAINT flash_deals_deal_origin_check
     CHECK (deal_origin IN ('vendor', 'brain'));
+
+-- v3.5 — Stripe Connect, manual capture, QR pickup, trust ledger
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS stripe_account_id VARCHAR(64);
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS stripe_account_status VARCHAR(32) DEFAULT 'pending';
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS stripe_debit_card_last4 VARCHAR(4);
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS payout_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS total_orders_fulfilled INTEGER DEFAULT 0;
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS total_no_shows INTEGER DEFAULT 0;
+
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(64);
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS total_reservations INTEGER DEFAULT 0;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS total_no_shows INTEGER DEFAULT 0;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS no_show_strikes INTEGER DEFAULT 0;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS trust_level INTEGER DEFAULT 0;
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS stripe_capture_method VARCHAR(32) DEFAULT 'manual';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS stripe_captured_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_qr_code VARCHAR(64) UNIQUE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_qr_scanned_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_confirmed_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS vendor_no_show BOOLEAN DEFAULT FALSE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_no_show BOOLEAN DEFAULT FALSE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS payout_transfer_id VARCHAR(128);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS payout_released_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS flagged_for_review BOOLEAN DEFAULT FALSE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS review_reason TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_orders_pickup_qr ON orders (pickup_qr_code) WHERE pickup_qr_code IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS vendor_payouts (
+    id                  TEXT PRIMARY KEY DEFAULT ('vp_' || substr(md5(random()::text), 1, 10)),
+    vendor_id           TEXT NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+    order_id            TEXT REFERENCES orders(id),
+    stripe_transfer_id  VARCHAR(128),
+    gross_amount        NUMERIC(10,2) NOT NULL,
+    platform_fee        NUMERIC(10,2) NOT NULL,
+    net_amount          NUMERIC(10,2) NOT NULL,
+    status              VARCHAR(32) DEFAULT 'pending',
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    transferred_at      TIMESTAMPTZ,
+    paid_at             TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_vendor_payouts_vendor_id ON vendor_payouts(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_payouts_order_id ON vendor_payouts(order_id);
+
+CREATE TABLE IF NOT EXISTS trust_events (
+    id          TEXT PRIMARY KEY DEFAULT ('te_' || substr(md5(random()::text), 1, 10)),
+    entity_type VARCHAR(16) NOT NULL,
+    entity_id   TEXT NOT NULL,
+    event_type  VARCHAR(64) NOT NULL,
+    delta       DOUBLE PRECISION NOT NULL,
+    new_score   DOUBLE PRECISION NOT NULL,
+    order_id    TEXT REFERENCES orders(id),
+    notes       TEXT,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_trust_events_entity ON trust_events (entity_type, entity_id);
+
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check;
+ALTER TABLE orders ADD CONSTRAINT orders_status_check CHECK (status IN (
+    'pending_payment','paid','payment_failed','expired',
+    'fulfilled','refunded','reserved_unpaid','no_show','pending',
+    'confirmed','ready','cancelled'
+));

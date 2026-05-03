@@ -4,9 +4,10 @@ import os
 
 
 def service_fee_rate() -> float:
-    raw = "0.15".strip()
+    """Platform fee as a decimal (e.g. 0.15 for 15%)."""
+    raw = os.getenv("STRIPE_PLATFORM_FEE_PERCENT", "15").strip()
     try:
-        r = float(raw)
-        return r if r >= 0 else 0.15
+        p = float(raw)
+        return max(0.0, p / 100.0)
     except ValueError:
         return 0.15

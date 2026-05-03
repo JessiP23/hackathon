@@ -95,6 +95,88 @@ async def telegram_webhook(request: Request):
 
         await telegram_client.answer_callback_query(cq_id)
 
+        if data.startswith("vo_mk|"):
+            from app.services.fulfillment_service import FulfillmentService
+            from app.services.order_service import OrderService
+
+            oid = data.split("|", 1)[1].strip()
+            vendor = agent_service._get_vendor_by_phone(phone)
+            o = OrderService().get_order(oid) if vendor else None
+            if not vendor or not o or o.get("vendorId") != vendor["id"]:
+                await telegram_client.send_message(chat_id, "Could not verify this order for your stall.")
+            else:
+                try:
+                    FulfillmentService().vendor_confirm_making(oid)
+                    await telegram_client.send_message(chat_id, "Marked as making it. I'll prompt you when to charge.")
+                except ValueError as e:
+                    await telegram_client.send_message(chat_id, str(e))
+            return {"ok": True}
+
+        if data.startswith("vo_cx|"):
+            from app.services.fulfillment_service import FulfillmentService
+            from app.services.order_service import OrderService
+
+            oid = data.split("|", 1)[1].strip()
+            vendor = agent_service._get_vendor_by_phone(phone)
+            o = OrderService().get_order(oid) if vendor else None
+            if not vendor or not o or o.get("vendorId") != vendor["id"]:
+                await telegram_client.send_message(chat_id, "Could not verify this order.")
+            else:
+                try:
+                    FulfillmentService().handle_vendor_cancellation(oid)
+                    await telegram_client.send_message(chat_id, "Order cancelled — customer was not charged.")
+                except ValueError as e:
+                    await telegram_client.send_message(chat_id, str(e))
+            return {"ok": True}
+
+        if data.startswith("vo_rd|"):
+            from app.services.fulfillment_service import FulfillmentService
+            from app.services.order_service import OrderService
+
+            oid = data.split("|", 1)[1].strip()
+            vendor = agent_service._get_vendor_by_phone(phone)
+            o = OrderService().get_order(oid) if vendor else None
+            if not vendor or not o or o.get("vendorId") != vendor["id"]:
+                await telegram_client.send_message(chat_id, "Could not verify this order.")
+            else:
+                try:
+                    FulfillmentService().vendor_mark_ready(oid)
+                    await telegram_client.send_message(chat_id, "Customer card charged — they can show the pickup QR.")
+                except (ValueError, RuntimeError) as e:
+                    await telegram_client.send_message(chat_id, str(e))
+            return {"ok": True}
+
+        if data.startswith("vo_cf|"):
+            from app.services.fulfillment_service import FulfillmentService
+            from app.services.order_service import OrderService
+
+            parts = data.split("|")
+            if len(parts) < 3:
+                return {"ok": True}
+            oid, qr = parts[1].strip(), parts[2].strip()
+            vendor = agent_service._get_vendor_by_phone(phone)
+            o = OrderService().get_order(oid) if vendor else None
+            if not vendor or not o or o.get("vendorId") != vendor["id"]:
+                await telegram_client.send_message(chat_id, "Could not verify this order.")
+            else:
+                try:
+                    FulfillmentService().confirm_pickup_by_qr(oid, qr)
+                    await telegram_client.send_message(chat_id, "Pickup confirmed — payout recorded.")
+                except ValueError as e:
+                    await telegram_client.send_message(chat_id, str(e))
+            return {"ok": True}
+
+        if data.startswith("vo_bad|"):
+            from app.services.order_service import OrderService
+
+            oid = data.split("|", 1)[1].strip()
+            OrderService().flag_order_for_review(oid, reason="qr_vendor_mismatch")
+            await telegram_client.send_message(
+                chat_id,
+                "Flagged for manual review. Hold the payout until ops clears it.",
+            )
+            return {"ok": True}
+
         if data.startswith("cancel_"):
             deal_id = data[len("cancel_") :]
             vendor = agent_service._get_vendor_by_phone(phone)

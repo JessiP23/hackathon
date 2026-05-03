@@ -29,11 +29,45 @@ def create_scheduler():
 
     scheduler.add_job(expire_deals, IntervalTrigger(minutes=5), id="expire_deals", replace_existing=True)
 
+    scheduler.add_job(no_show_sweep, IntervalTrigger(minutes=5), id="no_show_sweep", replace_existing=True)
+
     scheduler.add_job(auto_flash_engine, IntervalTrigger(minutes=30), id="auto_flash", replace_existing=True)
 
     scheduler.add_job(weekly_stats_hourly, IntervalTrigger(hours=1), id="weekly_stats_tz", replace_existing=True)
 
     return scheduler
+
+
+def no_show_sweep():
+    try:
+        from app.services.fulfillment_service import FulfillmentService
+
+        db = SessionLocal()
+        try:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT o.id FROM orders o
+                    JOIN flash_deals fd ON o.deal_id = fd.id
+                    WHERE o.status = 'ready'
+                      AND o.pickup_qr_scanned_at IS NULL
+                      AND fd.end_at + INTERVAL '30 minutes' < NOW()
+                    """
+                ),
+            ).fetchall()
+        finally:
+            db.close()
+        fs = FulfillmentService()
+        for r in rows:
+            oid = r[0]
+            try:
+                fs.handle_customer_no_show(oid)
+            except Exception as e:
+                print(f"[Scheduler] no_show sweep failed for {oid}: {e}", flush=True)
+    except Exception as e:
+        import traceback
+
+        print(f"[Scheduler] no_show_sweep failed: {e}\n{traceback.format_exc()}", flush=True)
 
 
 def expire_deals():

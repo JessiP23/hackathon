@@ -98,10 +98,29 @@ export default function DealsPage() {
           quantity: qty,
           redeemPoints,
         });
+        if (order.error) {
+          alert(order.error);
+          return;
+        }
         void getUserByPhone(phone).then((u) => {
           if (u?.rewardPoints != null) setPointsBalance(u.rewardPoints);
         });
-        if (order.checkoutUrl) {
+        if (order.clientSecret && order.publishableKey) {
+          try {
+            sessionStorage.setItem(
+              "infrastreet_pay",
+              JSON.stringify({
+                orderId: order.orderId,
+                clientSecret: order.clientSecret,
+                publishableKey: order.publishableKey,
+                trustLevel: order.trustLevel ?? 0,
+              }),
+            );
+          } catch {
+            /* ignore */
+          }
+          router.push(`/checkout?orderId=${encodeURIComponent(order.orderId)}`);
+        } else if (order.checkoutUrl) {
           try {
             sessionStorage.setItem(
               "infrastreet_checkout",

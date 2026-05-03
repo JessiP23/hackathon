@@ -1,17 +1,139 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { loadStripe } from "@stripe/stripe-js";
+import type { StripeElementsOptions } from "@stripe/stripe-js";
+import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { getOrder } from "@/app/services/api";
-import { Order } from "@/app/shared/types";
+import type { Order } from "@/app/shared/types";
 import { MobileAppFrame, MobileNav } from "@/app/components/MobileLayout";
 import { DataCard, PillButton, DividerLine, stripeElementsAppearance } from "@/app/components/Precision";
 
+type PaySession = {
+  orderId: string;
+  clientSecret: string;
+  publishableKey: string;
+  trustLevel?: number;
+};
+
+function readPaySession(orderId: string | null): PaySession | null {
+  if (!orderId || typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem("infrastreet_pay");
+    const p = raw ? (JSON.parse(raw) as PaySession) : null;
+    if (p?.orderId === orderId && p.clientSecret && p.publishableKey) return p;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function PayForm({
+  orderId,
+  trustLevel,
+  onDone,
+}: {
+  orderId: string;
+  trustLevel: number;
+  onDone: () => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const onSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!stripe || !elements) return;
+      setBusy(true);
+      setErr(null);
+      const { error } = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          return_url: `${window.location.origin}/orders/${encodeURIComponent(orderId)}`,
+        },
+        redirect: "if_required",
+      });
+      if (error) {
+        setErr(error.message || "Payment failed");
+        setBusy(false);
+        return;
+      }
+      onDone();
+    },
+    [stripe, elements, orderId, onDone],
+  );
+
+  const upfront = trustLevel >= 2;
+
+  return (
+    <form onSubmit={(e) => void onSubmit(e)} className="space-y-4">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "10px",
+          background: "var(--is-card-raised)",
+          border: "0.5px solid var(--is-border-1)",
+          borderLeft: upfront ? "2px solid var(--is-red)" : "2px solid var(--is-purple)",
+          borderRadius: "0 10px 10px 0",
+          padding: "12px 14px",
+          marginBottom: "14px",
+        }}
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke={upfront ? "var(--is-red)" : "var(--is-purple)"}
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          style={{ flexShrink: 0, marginTop: "1px" }}
+        >
+          <rect x="3" y="7" width="10" height="8" rx="1.5" />
+          <path d="M5 7V5a3 3 0 016 0v2" />
+        </svg>
+        <div>
+          <div
+            style={{
+              fontSize: "12px",
+              fontWeight: 600,
+              color: "var(--is-text-2)",
+              marginBottom: "3px",
+            }}
+          >
+            {upfront ? "Charged when you reserve" : "Card held, not charged yet"}
+          </div>
+          <div style={{ fontSize: "12px", color: "var(--is-text-3)", lineHeight: "1.5" }}>
+            {upfront
+              ? "Due to previous no-shows, your card is charged immediately when you complete payment."
+              : "Your card is reserved now. You're only charged when the vendor marks your order ready for pickup."}
+          </div>
+        </div>
+      </div>
+      <PaymentElement />
+      {err ? <p className="text-[13px] text-[var(--is-red)]">{err}</p> : null}
+      <PillButton type="submit" disabled={!stripe || busy}>
+        {busy ? "Processing…" : "Pay"}
+      </PillButton>
+    </form>
+  );
+}
+
 function CheckoutInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const orderId = searchParams.get("orderId");
   const [order, setOrder] = useState<Order | null | undefined>(undefined);
-  const [payTab, setPayTab] = useState<"card" | "apple">("card");
+  const [pay, setPay] = useState<PaySession | null | undefined>(undefined);
+
+  useEffect(() => {
+    const p = readPaySession(orderId);
+    setPay(p);
+  }, [orderId]);
 
   useEffect(() => {
     if (!orderId) {
@@ -32,44 +154,32 @@ function CheckoutInner() {
     };
   }, [orderId]);
 
-  let checkoutUrl = order?.checkoutUrl ?? "";
-  if (!checkoutUrl && typeof window !== "undefined" && orderId) {
-    try {
-      const raw = sessionStorage.getItem("infrastreet_checkout");
-      const p = raw ? (JSON.parse(raw) as { orderId?: string; url?: string }) : null;
-      if (p?.orderId === orderId && p?.url) checkoutUrl = p.url;
-    } catch {
-      /* ignore */
-    }
-  }
+  const stripePromise = useMemo(() => {
+    if (!pay?.publishableKey) return null;
+    return loadStripe(pay.publishableKey);
+  }, [pay?.publishableKey]);
 
-  const total = order?.total ?? 0;
-  const subtotal = order
-    ? Math.round(
-        order.items.reduce((s, i) => s + (i.price ?? 0) * i.quantity, 0) * 100
-      ) / 100
-    : 0;
-  const platformFee =
-    order && order.serviceFee != null && order.serviceFee !== undefined
-      ? order.serviceFee
-      : order
-        ? Math.round(Math.max(0, total - subtotal) * 100) / 100
-        : 0;
-  const rewardsOff =
-    order
-      ? Math.round(Math.max(0, subtotal + platformFee - total) * 100) / 100
-      : 0;
+  const elementsOptions: StripeElementsOptions | null = useMemo(() => {
+    if (!pay?.clientSecret) return null;
+    return {
+      clientSecret: pay.clientSecret,
+      appearance: stripeElementsAppearance,
+    };
+  }, [pay?.clientSecret]);
+
+  const onPaid = useCallback(() => {
+    router.push(`/orders/${encodeURIComponent(orderId!)}`);
+  }, [router, orderId]);
 
   const backHref =
     order && order.vendorId != null ? `/vendor/${order.vendorId}` : "/deals";
 
-  if (order === undefined) {
+  if (order === undefined || pay === undefined) {
     return (
       <>
         <MobileNav title="Checkout" backHref="/deals" />
         <main className="page-enter px-5 py-8">
           <div className="skeleton mb-4 h-28 w-full rounded-[16px]" />
-          <div className="skeleton h-14 w-full rounded-[12px]" />
         </main>
       </>
     );
@@ -88,6 +198,31 @@ function CheckoutInner() {
     );
   }
 
+  if (!pay || !stripePromise || !elementsOptions) {
+    return (
+      <>
+        <MobileNav title="Checkout" backHref={backHref} />
+        <main className="page-enter px-5 py-10">
+          <DataCard>
+            <p className="text-[15px] text-[var(--is-text-2)] mb-3">
+              Start checkout from a deal — payment session expired or missing.
+            </p>
+            <PillButton type="button" onClick={() => router.push("/deals")}>
+              Browse deals
+            </PillButton>
+          </DataCard>
+        </main>
+      </>
+    );
+  }
+
+  const total = order.total ?? 0;
+  const subtotal = order.items.reduce((s, i) => s + (i.price ?? 0) * i.quantity, 0);
+  const platformFee =
+    order.serviceFee != null && order.serviceFee !== undefined
+      ? order.serviceFee
+      : Math.round(Math.max(0, total - subtotal) * 100) / 100;
+
   return (
     <>
       <MobileNav title="Checkout" backHref={backHref} />
@@ -95,108 +230,48 @@ function CheckoutInner() {
         className="page-enter px-5 py-6"
         data-stripe-primary={stripeElementsAppearance.variables.colorPrimary}
       >
-      <DataCard className="mb-6">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[17px] font-bold tracking-[-0.02em] text-[var(--is-text-1)]">{order.vendorName ?? "Vendor"}</p>
-            {order.dealId ? (
-              <p className="mt-1 text-[12px] text-[var(--is-text-3)]">Flash deal checkout</p>
-            ) : (
-              <p className="mt-1 text-[12px] text-[var(--is-text-3)]">Menu order checkout</p>
-            )}
+        <DataCard className="mb-6">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[17px] font-bold tracking-[-0.02em] text-[var(--is-text-1)]">
+                {order.vendorName ?? "Vendor"}
+              </p>
+              <p className="mt-1 text-[12px] text-[var(--is-text-3)]">Flash deal · Stripe</p>
+            </div>
+            <p className="text-[22px] font-bold tracking-[-0.03em] text-[var(--is-text-1)] [font-variant-numeric:tabular-nums]">
+              ${total.toFixed(2)}
+            </p>
           </div>
-          <p className="text-[22px] font-bold tracking-[-0.03em] text-[var(--is-text-1)] [font-variant-numeric:tabular-nums]">
+        </DataCard>
+
+        <DataCard className="mb-6">
+          <Elements stripe={stripePromise} options={elementsOptions}>
+            <PayForm
+              orderId={orderId}
+              trustLevel={pay.trustLevel ?? 0}
+              onDone={onPaid}
+            />
+          </Elements>
+        </DataCard>
+
+        <div className="mb-4 space-y-2 text-[13px] text-[var(--is-text-2)]">
+          <div className="flex justify-between">
+            <span>Food subtotal</span>
+            <span className="[font-variant-numeric:tabular-nums]">${subtotal.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Platform fee (15%)</span>
+            <span className="[font-variant-numeric:tabular-nums]">${platformFee.toFixed(2)}</span>
+          </div>
+        </div>
+        <DividerLine />
+        <div className="mb-8 flex justify-between pt-2">
+          <span className="text-[15px] font-semibold text-[var(--is-text-1)]">Total</span>
+          <span className="text-[22px] font-bold tracking-[-0.03em] text-[var(--is-text-1)] [font-variant-numeric:tabular-nums]">
             ${total.toFixed(2)}
-          </p>
+          </span>
         </div>
-      </DataCard>
-
-      <div className="mb-6 flex gap-2">
-        <button
-          type="button"
-          onClick={() => setPayTab("card")}
-          className={`min-h-[44px] flex-1 rounded-[20px] border-[0.5px] px-4 text-[13px] font-medium ${
-            payTab === "card"
-              ? "border-[var(--is-purple)] bg-[var(--is-purple-tint)] text-[var(--is-purple)]"
-              : "border-[var(--is-border-1)] bg-[var(--is-surface)] text-[var(--is-text-3)]"
-          }`}
-        >
-          Card
-        </button>
-        <button
-          type="button"
-          onClick={() => setPayTab("apple")}
-          className={`min-h-[44px] flex-1 rounded-[20px] border-[0.5px] px-4 text-[13px] font-medium ${
-            payTab === "apple"
-              ? "border-[var(--is-purple)] bg-[var(--is-purple-tint)] text-[var(--is-purple)]"
-              : "border-[var(--is-border-1)] bg-[var(--is-surface)] text-[var(--is-text-3)]"
-          }`}
-        >
-          Apple Pay
-        </button>
-      </div>
-
-      <DataCard className="mb-6 space-y-2">
-        <p className="text-[11px] font-semibold tracking-[0.08em] text-[var(--is-text-4)] uppercase">
-          {payTab === "apple" ? "Apple Pay" : "Card"} (Stripe)
-        </p>
-        <p className="text-[13px] text-[var(--is-text-2)]">
-          Hosted Checkout opens next — use <code className="font-[family-name:var(--is-mono)] text-[12px]">appearance</code>{" "}
-          from code when you embed Elements.
-        </p>
-      </DataCard>
-
-      <div className="mb-4 space-y-2 text-[13px] text-[var(--is-text-2)]">
-        <div className="flex justify-between">
-          <span>Food subtotal</span>
-          <span className="[font-variant-numeric:tabular-nums]">${subtotal.toFixed(2)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span>Platform fee (15%)</span>
-          <span className="[font-variant-numeric:tabular-nums]">${platformFee.toFixed(2)}</span>
-        </div>
-        {rewardsOff > 0 ? (
-          <div className="flex justify-between text-[var(--is-green)]">
-            <span>Rewards</span>
-            <span className="[font-variant-numeric:tabular-nums]">−${rewardsOff.toFixed(2)}</span>
-          </div>
-        ) : null}
-      </div>
-      <DividerLine />
-      <div className="mb-8 flex justify-between pt-2">
-        <span className="text-[15px] font-semibold text-[var(--is-text-1)]">Total</span>
-        <span className="text-[22px] font-bold tracking-[-0.03em] text-[var(--is-text-1)] [font-variant-numeric:tabular-nums]">
-          ${total.toFixed(2)}
-        </span>
-      </div>
-
-      <PillButton
-        type="button"
-        disabled={!checkoutUrl}
-        onClick={() => {
-          if (checkoutUrl) window.location.href = checkoutUrl;
-        }}
-      >
-        Pay ${total.toFixed(2)}
-      </PillButton>
-
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-2 text-[11px] text-[var(--is-text-4)]">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M7 11V8a5 5 0 0110 0v3M6 20h12v-7H6v7z"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
-        <span>256-bit SSL encryption</span>
-        <span
-          className="rounded-[20px] border-[0.5px] border-[var(--is-border-1)] px-[10px] py-1 text-[10px]"
-        >
-          Stripe
-        </span>
-      </div>
-    </main>
+      </main>
     </>
   );
 }

@@ -12,6 +12,8 @@ export interface User {
   rewardPoints?: number;
   referralCode?: string;
   referralBonusApplied?: boolean;
+  /** 2+ = upfront capture on reserve (trust policy). */
+  trustLevel?: number;
 }
 
 export interface MenuItem {
@@ -69,11 +71,23 @@ export interface Order {
   total?: number;
   serviceFee?: number;
   pickupCode?: string;
+  /** Pickup code shown as QR / IS-XXXXXXXX when present. */
+  pickupQrCode?: string | null;
   checkoutUrl?: string;
+  /** Embedded Stripe checkout (deal flow). */
+  clientSecret?: string;
+  publishableKey?: string;
+  captureMethod?: string;
+  trustLevel?: number;
   stripePaymentIntent?: string | null;
+  stripeCaptureMethod?: string | null;
+  stripeCapturedAt?: string | null;
+  customerNoShow?: boolean;
+  payoutTransferId?: string | null;
   createdAt?: string;
   pointsRedeemed?: number;
   pointsDiscount?: number;
+  error?: string;
 }
 
 export interface VoiceResponse {

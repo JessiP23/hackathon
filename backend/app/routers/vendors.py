@@ -39,6 +39,14 @@ def vendor_active_deals(vendor_id: str):
     return deal_svc.get_active_deals_for_vendor(vendor_id)
 
 
+@router.get("/{vendor_id}/payout-status")
+def vendor_payout_status(vendor_id: str):
+    row = service.get_payout_status(vendor_id)
+    if row is None:
+        raise HTTPException(404, "Not found")
+    return row
+
+
 @router.post("/{vendor_id}/menu")
 async def upload_menu(vendor_id: str, file: UploadFile = File(...)):
     return await service.upload_menu(vendor_id, file)

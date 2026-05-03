@@ -1,9 +1,15 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+
 from app.schemas.order import OrderCreate, OrderStatusUpdate
 from app.services.order_service import OrderService
 
 router = APIRouter()
 service = OrderService()
+
+
+class PickupConfirmBody(BaseModel):
+    qrCode: str
 
 
 @router.post("")
@@ -43,6 +49,48 @@ def get_order(order_id: str):
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     return order
+
+
+def _verify_vendor_order(vendor_id: str, order_id: str) -> None:
+    o = service.get_order(order_id)
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if o.get("vendorId") != vendor_id:
+        raise HTTPException(status_code=403, detail="Not this vendor's order")
+
+
+@router.post("/{order_id}/ready")
+def mark_order_ready(order_id: str, vendor_id: str = Query(..., description="Vendor id")):
+    from app.services.fulfillment_service import FulfillmentService
+
+    _verify_vendor_order(vendor_id, order_id)
+    try:
+        return FulfillmentService().vendor_mark_ready(order_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/{order_id}/pickup")
+def confirm_pickup(order_id: str, body: PickupConfirmBody):
+    from app.services.fulfillment_service import FulfillmentService
+
+    try:
+        return FulfillmentService().confirm_pickup_by_qr(order_id, body.qrCode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{order_id}/cancel")
+def cancel_order_vendor(order_id: str, vendor_id: str = Query(...)):
+    from app.services.fulfillment_service import FulfillmentService
+
+    _verify_vendor_order(vendor_id, order_id)
+    try:
+        return FulfillmentService().handle_vendor_cancellation(order_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.patch("/{order_id}/status")

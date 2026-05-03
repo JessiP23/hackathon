@@ -159,8 +159,21 @@ export async function placeDealOrder(
   dealId: string,
   data: { customerPhone: string; quantity: number; customerId?: string; redeemPoints?: number }
 ): Promise<Order> {
-  const res = await api.post(`/deals/${dealId}/order`, data);
-  return res.data;
+  try {
+    const res = await api.post(`/deals/${dealId}/order`, data);
+    return res.data;
+  } catch (e) {
+    if (axios.isAxiosError(e) && e.response?.data && typeof (e.response.data as { detail?: unknown }).detail === "string") {
+      return {
+        orderId: "",
+        vendorId: "",
+        status: "error",
+        items: [],
+        error: (e.response.data as { detail: string }).detail,
+      };
+    }
+    throw e;
+  }
 }
 
 export async function notifyOptIn(data: {

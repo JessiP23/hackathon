@@ -126,8 +126,11 @@ class UserService:
             row = db.execute(
                 text(
                     """
-                    SELECT id, phone, role, name, COALESCE(reward_points, 0), referral_code
-                    FROM users WHERE phone = :phone
+                    SELECT u.id, u.phone, u.role, u.name, COALESCE(u.reward_points, 0), u.referral_code,
+                           COALESCE(c.trust_level, 0)
+                    FROM users u
+                    LEFT JOIN customers c ON c.phone = u.phone
+                    WHERE u.phone = :phone
                     """
                 ),
                 {"phone": norm},
@@ -136,8 +139,11 @@ class UserService:
                 row = db.execute(
                     text(
                         """
-                        SELECT id, phone, role, name, COALESCE(reward_points, 0), referral_code
-                        FROM users WHERE phone = :plike
+                        SELECT u.id, u.phone, u.role, u.name, COALESCE(u.reward_points, 0), u.referral_code,
+                               COALESCE(c.trust_level, 0)
+                        FROM users u
+                        LEFT JOIN customers c ON c.phone = u.phone
+                        WHERE u.phone = :plike
                         """
                     ),
                     {"plike": phone},
@@ -145,7 +151,15 @@ class UserService:
             if not row:
                 return None
 
-            uid, ph, role, name, rpoints, rcode = row[0], row[1], row[2], row[3], row[4], row[5]
+            uid, ph, role, name, rpoints, rcode, trust = (
+                row[0],
+                row[1],
+                row[2],
+                row[3],
+                row[4],
+                row[5],
+                int(row[6] or 0),
+            )
             if not rcode:
                 code = _new_referral_code(db)
                 db.execute(
@@ -162,6 +176,7 @@ class UserService:
                 "name": name,
                 "rewardPoints": int(rpoints or 0),
                 "referralCode": rcode,
+                "trustLevel": trust,
             }
         finally:
             db.close()

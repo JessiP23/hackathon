@@ -267,3 +267,48 @@ class VendorService:
                 unique.append(t)
 
         return unique
+
+    def get_payout_status(self, vendor_id: str) -> dict | None:
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                text(
+                    """
+                    SELECT COALESCE(payout_enabled, false),
+                           COALESCE(stripe_account_status, 'pending'),
+                           stripe_debit_card_last4,
+                           stripe_account_id
+                    FROM vendors WHERE id = :id
+                    """
+                ),
+                {"id": vendor_id},
+            ).fetchone()
+            if not row:
+                return None
+            last = None
+            try:
+                last = db.execute(
+                    text(
+                        """
+                        SELECT net_amount, created_at FROM vendor_payouts
+                        WHERE vendor_id = :id
+                          AND COALESCE(stripe_transfer_id, '') <> ''
+                        ORDER BY created_at DESC NULLS LAST LIMIT 1
+                        """
+                    ),
+                    {"id": vendor_id},
+                ).fetchone()
+            except Exception:
+                pass
+            out = {
+                "payoutEnabled": bool(row[0]),
+                "stripeAccountStatus": str(row[1] or "pending"),
+                "debitCardLast4": row[2],
+                "stripeAccountId": row[3],
+            }
+            if last:
+                out["lastPayoutNet"] = float(last[0] or 0)
+                out["lastPayoutAt"] = last[1].isoformat() if last[1] else None
+            return out
+        finally:
+            db.close()

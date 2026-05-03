@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import QRCode from "qrcode";
-import { getOrder, getOrderReceipt, updateOrderStatus } from "@/app/services/api";
+import { getOrder, getOrderReceipt } from "@/app/services/api";
 import { Order } from "@/app/shared/types";
 import { MobileAppFrame, MobileNav } from "@/app/components/MobileLayout";
 import {
@@ -20,7 +20,8 @@ import {
 function orderStatusKind(status: string): StatusKind {
   const s = status.toLowerCase();
   if (s === "ready") return "ready";
-  if (s === "preparing" || s === "pending") return "pending";
+  if (s === "fulfilled" || s === "no_show") return "picked_up";
+  if (s === "preparing" || s === "pending" || s === "paid" || s === "confirmed") return "pending";
   if (s === "completed") return "picked_up";
   return "confirmed";
 }
@@ -37,7 +38,6 @@ export default function OrderDetailPage() {
   const [order, setOrder] = useState<Order | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "err">("loading");
   const [qrUrl, setQrUrl] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [receiptBusy, setReceiptBusy] = useState(false);
 
   useEffect(() => {
@@ -61,7 +61,7 @@ export default function OrderDetailPage() {
 
   useEffect(() => {
     if (!order) return;
-    const text = `#IS-${order.pickupCode ?? order.orderId.slice(0, 6)} · ${order.items.map((i) => i.name).join(", ")}`;
+    const text = `${order.pickupQrCode ?? order.pickupCode ?? `#${order.orderId.slice(0, 8)}`} · ${order.items.map((i) => i.name).join(", ")}`;
     let cancelled = false;
     QRCode.toDataURL(text.slice(0, 200), {
       width: 80,
@@ -97,19 +97,6 @@ export default function OrderDetailPage() {
       router.push(`/orders/${order.orderId}/receipt`);
     } finally {
       setReceiptBusy(false);
-    }
-  }
-
-  async function confirmPickup() {
-    if (!order) return;
-    setBusy(true);
-    try {
-      await updateOrderStatus(order.orderId, "completed");
-      setOrder({ ...order, status: "completed" });
-    } catch {
-      alert("Could not update order.");
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -173,28 +160,42 @@ export default function OrderDetailPage() {
           <StatusPill kind={kind}>{order.status}</StatusPill>
         </div>
 
+        {(order.status?.toLowerCase() === "pending" ||
+          order.status?.toLowerCase() === "confirmed" ||
+          order.status?.toLowerCase() === "paid") && (
+          <div
+            style={{
+              background: "var(--is-card-raised)",
+              border: "0.5px solid var(--is-border-1)",
+              borderLeft: "2px solid var(--is-amber)",
+              borderRadius: "0 10px 10px 0",
+              padding: "10px 14px",
+              marginBottom: "14px",
+              fontSize: "12px",
+              color: "var(--is-text-3)",
+            }}
+          >
+            <span style={{ color: "var(--is-amber)", fontWeight: 600 }}>Awaiting vendor · </span>
+            Card on hold. You&apos;ll be charged when the vendor confirms your order is ready.
+          </div>
+        )}
+
         {order.status?.toLowerCase() === "ready" && (
-          <AccentCard className="mb-6 flex gap-3">
-            <div
-              className="flex size-8 shrink-0 items-center justify-center rounded-full"
-              style={{ background: "var(--is-green-tint)" }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M12 21s7-4.5 7-10a7 7 0 10-14 0c0 5.5 7 10 7 10z"
-                  stroke="var(--is-green)"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <circle cx="12" cy="11" r="2" fill="var(--is-green)" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-[13px] font-medium text-[var(--is-green)]">Ready now</p>
-              <p className="text-[15px] text-[var(--is-text-1)]">{order.vendorName ?? "Vendor"}</p>
-            </div>
-          </AccentCard>
+          <div
+            style={{
+              background: "var(--is-card-raised)",
+              border: "0.5px solid var(--is-green-border)",
+              borderLeft: "2px solid var(--is-green)",
+              borderRadius: "0 10px 10px 0",
+              padding: "10px 14px",
+              marginBottom: "14px",
+              fontSize: "12px",
+              color: "var(--is-text-3)",
+            }}
+          >
+            <span style={{ color: "var(--is-green)", fontWeight: 600 }}>Ready · </span>
+            Card charged. Show QR code to vendor to collect your order.
+          </div>
         )}
 
         <DataCard className="mb-8">
@@ -208,7 +209,7 @@ export default function OrderDetailPage() {
             )}
           </div>
           <p className="text-center font-[family-name:var(--is-mono)] text-[12px] text-[var(--is-text-4)]">
-            #IS-{order.pickupCode ?? order.orderId.slice(0, 6)} ·{" "}
+            {order.pickupQrCode ?? order.pickupCode ?? order.orderId.slice(0, 8)} ·{" "}
             {order.items.map((i) => `${i.name} ×${i.quantity}`).join(" · ")}
           </p>
         </DataCard>
@@ -241,6 +242,15 @@ export default function OrderDetailPage() {
               <span className="[font-variant-numeric:tabular-nums]">−${rewardsOff.toFixed(2)}</span>
             </div>
           ) : null}
+          <div className="flex justify-between py-[5px]">
+            <span className="text-[12px] text-[var(--is-text-3)]">Payment</span>
+            <span
+              className="text-[12px] font-semibold [font-variant-numeric:tabular-nums]"
+              style={{ color: order.stripeCapturedAt ? "var(--is-green)" : "var(--is-amber)" }}
+            >
+              {order.stripeCapturedAt ? "Charged" : "On hold"}
+            </span>
+          </div>
         </div>
         <DividerLine />
         <div className="flex items-baseline justify-between pt-1">
@@ -251,9 +261,9 @@ export default function OrderDetailPage() {
         </div>
 
         <div className="mt-8 space-y-3">
-          {order.status?.toLowerCase() === "ready" ? (
-            <PillButton variant="success" disabled={busy} onClick={() => void confirmPickup()}>
-              {busy ? "Confirming…" : "Confirm pickup"}
+          {["pending", "confirmed", "paid", "ready"].includes(order.status?.toLowerCase() ?? "") ? (
+            <PillButton type="button" variant="success" onClick={() => router.push(`/orders/${order.orderId}/qr`)}>
+              Show pickup code
             </PillButton>
           ) : null}
           {canShowReceipt(order.status) ? (

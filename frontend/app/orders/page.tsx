@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { getCustomerOrders, getRecommendations } from "@/app/services/api";
+import { getCustomerOrders, getRecommendations, getUserByPhone } from "@/app/services/api";
 import { Order, Vendor } from "@/app/shared/types";
 import { MobileAppFrame, MobileNav } from "@/app/components/MobileLayout";
 import { MetricCard, PillLink, type StatusKind } from "@/app/components/Precision";
@@ -11,7 +11,7 @@ function orderStatusKind(status: string): StatusKind {
   const s = status.toLowerCase();
   if (s === "ready") return "ready";
   if (s === "preparing" || s === "pending" || s === "paid") return "pending";
-  if (s === "completed" || s === "picked_up") return "picked_up";
+  if (s === "completed" || s === "picked_up" || s === "fulfilled" || s === "no_show") return "picked_up";
   return "confirmed";
 }
 
@@ -34,6 +34,14 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [recommendations, setRecommendations] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const [trustLevel, setTrustLevel] = useState(0);
+
+  useEffect(() => {
+    const phone = localStorage.getItem("infrastreet_phone");
+    if (!phone) return;
+    void getUserByPhone(phone).then((u) => setTrustLevel(u?.trustLevel ?? 0));
+  }, []);
 
   useEffect(() => {
     async function loadOrders() {
@@ -62,7 +70,7 @@ export default function OrdersPage() {
       const created = o.createdAt ? new Date(o.createdAt).getTime() : 0;
       if (created >= weekAgo && o.total) spend += o.total;
       if (o.status?.toLowerCase() === "ready") ready += 1;
-      if (["completed", "picked_up", "cancelled"].includes(o.status?.toLowerCase() ?? "")) {
+      if (["completed", "picked_up", "cancelled", "fulfilled", "no_show"].includes(o.status?.toLowerCase() ?? "")) {
         done.push(o);
       } else {
         act.push(o);
@@ -84,6 +92,25 @@ export default function OrdersPage() {
       />
 
       <main className="page-enter px-4 py-6">
+        {trustLevel >= 2 && (
+          <div
+            style={{
+              background: "var(--is-card-raised)",
+              border: "0.5px solid rgba(255,59,48,0.25)",
+              borderLeft: "2px solid var(--is-red)",
+              borderRadius: "0 12px 12px 0",
+              padding: "12px 14px",
+              marginBottom: "16px",
+            }}
+          >
+            <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--is-red)", marginBottom: "3px" }}>
+              Upfront payment required
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--is-text-3)", lineHeight: "1.5" }}>
+              Due to previous no-shows, your card is charged immediately when you reserve.
+            </div>
+          </div>
+        )}
         {loading && (
           <div className="space-y-3">
             <div className="skeleton h-24 w-full rounded-[10px]" />
@@ -200,17 +227,26 @@ function OrderRow({ order }: { order: Order }) {
             Items · {itemCount} ·{" "}
             <span className="font-[family-name:var(--is-mono)]">#{order.orderId.slice(0, 8)}</span>
           </p>
-          <span
-            className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${
-              kind === "ready"
-                ? "text-[var(--is-green)]"
-                : kind === "pending"
-                  ? "text-[var(--is-amber)]"
-                  : "text-[var(--is-text-4)]"
-            }`}
-          >
-            {order.status}
-          </span>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            {order.customerNoShow ? (
+              <span
+                className="text-[10px] font-semibold uppercase tracking-[0.05em] text-[var(--is-amber)]"
+              >
+                No-show · charged
+              </span>
+            ) : null}
+            <span
+              className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${
+                kind === "ready"
+                  ? "text-[var(--is-green)]"
+                  : kind === "pending"
+                    ? "text-[var(--is-amber)]"
+                    : "text-[var(--is-text-4)]"
+              }`}
+            >
+              {order.status}
+            </span>
+          </div>
         </div>
       </div>
     </Link>
