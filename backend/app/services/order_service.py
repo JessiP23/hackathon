@@ -238,13 +238,42 @@ class OrderService:
             if not r:
                 return None
             items = r.items if isinstance(r.items, list) else json.loads(r.items) if r.items else []
-            return {"orderId": r.id, "vendorId": r.vendor_id, "vendorName": r.vendor_name,
-                    "customerPhone": r.customer_phone, "items": items,
-                    "total": float(r.total) if r.total else 0, "status": r.status,
-                    "pickupCode": r.pickup_code,
-                    "createdAt": r.created_at.isoformat() if r.created_at else None}
+            sf = float(r.service_fee) if getattr(r, "service_fee", None) is not None else None
+            return {
+                "orderId": r.id,
+                "vendorId": r.vendor_id,
+                "vendorName": r.vendor_name,
+                "customerPhone": r.customer_phone,
+                "items": items,
+                "total": float(r.total) if r.total else 0,
+                "serviceFee": sf,
+                "status": r.status,
+                "pickupCode": r.pickup_code,
+                "stripePaymentIntent": getattr(r, "stripe_payment_intent", None),
+                "createdAt": r.created_at.isoformat() if r.created_at else None,
+            }
         finally:
             db.close()
+
+    def get_order_receipt_url(self, order_id: str) -> dict | None:
+        """Resolve Stripe receipt URL if payment was captured; callers fall back to in-app receipt."""
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                text("SELECT stripe_payment_intent FROM orders WHERE id = :oid LIMIT 1"),
+                {"oid": order_id},
+            ).fetchone()
+            if not row:
+                return None
+            pi = row[0]
+        finally:
+            db.close()
+        if not pi:
+            return {"receiptUrl": None}
+        from app.services.stripe_service import stripe_service
+
+        url = stripe_service.get_payment_receipt_url(pi)
+        return {"receiptUrl": url}
 
     def get_vendor_orders(self, vendor_id: str):
         db = SessionLocal()

@@ -75,6 +75,11 @@ export async function getOrder(orderId: string): Promise<Order> {
   return res.data;
 }
 
+export async function getOrderReceipt(orderId: string): Promise<{ receiptUrl: string | null }> {
+  const res = await api.get(`/orders/${encodeURIComponent(orderId)}/receipt`);
+  return res.data;
+}
+
 export async function getVendorOrders(vendorId: string): Promise<Order[]> {
   const res = await api.get(`/orders/vendor/${vendorId}`);
   return res.data;

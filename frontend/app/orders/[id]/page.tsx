@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import QRCode from "qrcode";
-import { getOrder, updateOrderStatus } from "@/app/services/api";
+import { getOrder, getOrderReceipt, updateOrderStatus } from "@/app/services/api";
 import { Order } from "@/app/shared/types";
 import { MobileAppFrame, MobileNav } from "@/app/components/MobileLayout";
 import {
@@ -25,13 +25,20 @@ function orderStatusKind(status: string): StatusKind {
   return "confirmed";
 }
 
+function canShowReceipt(status: string | undefined): boolean {
+  const s = (status ?? "").toLowerCase();
+  return !["pending_payment", "payment_failed", "expired", "reserved_unpaid"].includes(s);
+}
+
 export default function OrderDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const id = params.id as string;
   const [order, setOrder] = useState<Order | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "err">("loading");
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [receiptBusy, setReceiptBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,6 +78,27 @@ export default function OrderDetailPage() {
       cancelled = true;
     };
   }, [order]);
+
+  async function viewReceipt() {
+    if (!order) return;
+    if (!canShowReceipt(order.status)) {
+      alert("Receipt is available after payment completes.");
+      return;
+    }
+    setReceiptBusy(true);
+    try {
+      const { receiptUrl } = await getOrderReceipt(order.orderId);
+      if (receiptUrl) {
+        window.open(receiptUrl, "_blank", "noopener,noreferrer");
+      } else {
+        router.push(`/orders/${order.orderId}/receipt`);
+      }
+    } catch {
+      router.push(`/orders/${order.orderId}/receipt`);
+    } finally {
+      setReceiptBusy(false);
+    }
+  }
 
   async function confirmPickup() {
     if (!order) return;
@@ -121,8 +149,11 @@ export default function OrderDetailPage() {
   }
 
   const kind = orderStatusKind(order.status);
-  const subtotal = order.items.reduce((s, i) => s + (i.price ?? 0) * i.quantity, 0) || (order.total ?? 0) * 0.95;
-  const platformFee = Math.round(subtotal * 0.05 * 100) / 100;
+  const subtotal =
+    order.items.reduce((s, i) => s + (i.price ?? 0) * i.quantity, 0) ||
+    Math.round(((order.total ?? 0) / 1.13) * 100) / 100;
+  const platformFee =
+    order.serviceFee ?? Math.round(Math.max(0, (order.total ?? 0) - subtotal) * 100) / 100;
   const tax = Math.max(0, (order.total ?? subtotal + platformFee) - subtotal - platformFee);
   const total = order.total ?? subtotal + platformFee + tax;
 
@@ -210,16 +241,22 @@ export default function OrderDetailPage() {
           </span>
         </div>
 
-        <div className="mt-8">
+        <div className="mt-8 space-y-3">
           {order.status?.toLowerCase() === "ready" ? (
             <PillButton variant="success" disabled={busy} onClick={() => void confirmPickup()}>
               {busy ? "Confirming…" : "Confirm pickup"}
             </PillButton>
-          ) : (
-            <PillButton variant="ghost" type="button" onClick={() => {}}>
-              View receipt
+          ) : null}
+          {canShowReceipt(order.status) ? (
+            <PillButton
+              variant="ghost"
+              type="button"
+              disabled={receiptBusy}
+              onClick={() => void viewReceipt()}
+            >
+              {receiptBusy ? "Opening…" : "View receipt"}
             </PillButton>
-          )}
+          ) : null}
         </div>
       </main>
     </MobileAppFrame>

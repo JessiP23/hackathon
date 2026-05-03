@@ -26,6 +26,14 @@ def get_vendor_orders(vendor_id: str):
     return service.get_vendor_orders(vendor_id)
 
 
+@router.get("/{order_id}/receipt")
+def get_order_receipt(order_id: str):
+    body = service.get_order_receipt_url(order_id)
+    if body is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return body
+
+
 @router.get("/{order_id}")
 def get_order(order_id: str):
     order = service.get_order(order_id)

@@ -36,6 +36,9 @@ export default function OrderConfirmedPage() {
         </div>
         <div className="mt-10 w-full max-w-xs space-y-3">
           <PillLink href={`/orders/${id}`}>Track order</PillLink>
+          <PillLink href={`/orders/${id}/receipt`} variant="ghost">
+            View receipt
+          </PillLink>
           <PillLink href="/deals" variant="ghost">
             Back to deals
           </PillLink>

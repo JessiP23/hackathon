@@ -49,8 +49,8 @@ class StripeService:
                 },
             ],
             mode="payment",
-            success_url=f"{FRONTEND_URL}/order/{order_id}/confirmed",
-            cancel_url=f"{FRONTEND_URL}/deal/{deal_id}",
+            success_url=f"{FRONTEND_URL}/orders/{order_id}/confirmed",
+            cancel_url=f"{FRONTEND_URL}/deals?deal={deal_id}",
             expires_at=int((datetime.now(timezone.utc) + timedelta(minutes=30)).timestamp()),
             metadata={
                 "order_id": order_id,
@@ -73,6 +73,28 @@ class StripeService:
             return event
         except Exception as e:
             print(f"[Stripe] Webhook verification failed: {e}")
+            return None
+
+    def get_payment_receipt_url(self, payment_intent_id: str) -> str | None:
+        """Stripe-hosted receipt URL for the charge (live + test; may be null if unavailable)."""
+        if not STRIPE_OK or not payment_intent_id:
+            return None
+        try:
+            pi = stripe.PaymentIntent.retrieve(
+                payment_intent_id,
+                expand=["latest_charge"],
+            )
+            ch = pi.latest_charge
+            if ch is None:
+                return None
+            if isinstance(ch, str):
+                ch_obj = stripe.Charge.retrieve(ch)
+            else:
+                ch_obj = ch
+            url = getattr(ch_obj, "receipt_url", None)
+            return str(url) if url else None
+        except Exception as e:
+            print(f"[Stripe] receipt_url: {e}")
             return None
 
     def refund_payment_intent(self, payment_intent_id: str) -> dict:
