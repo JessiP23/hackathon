@@ -43,6 +43,44 @@ def get_order_receipt(order_id: str):
     return body
 
 
+@router.get("/{order_id}/checkout-session")
+def get_order_checkout_session(order_id: str):
+    body = service.get_deal_checkout_session(order_id)
+    if isinstance(body, dict) and body.get("error"):
+        raise HTTPException(status_code=400, detail=body["error"])
+    return body
+
+
+@router.get("/{order_id}/hosted-checkout")
+def get_order_hosted_checkout(order_id: str):
+    body = service.get_hosted_checkout_url(order_id)
+    if isinstance(body, dict) and body.get("error"):
+        raise HTTPException(status_code=400, detail=body["error"])
+    return body
+
+
+@router.post("/{order_id}/sync-stripe-checkout")
+def sync_stripe_checkout_order(order_id: str):
+    body = service.sync_order_if_checkout_completed(order_id)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=500, detail="Invalid response")
+    if body.get("error") == "Order not found":
+        raise HTTPException(status_code=404, detail=body["error"])
+    if body.get("ok") is False and body.get("error"):
+        raise HTTPException(status_code=503, detail=str(body["error"]))
+    return body
+
+
+@router.post("/{order_id}/ack-payment-authorized")
+def ack_payment_authorized(order_id: str):
+    body = service.ack_deal_payment_authorized(order_id)
+    if isinstance(body, dict) and body.get("error") == "Order not found":
+        raise HTTPException(status_code=404, detail=body["error"])
+    if isinstance(body, dict) and body.get("ok") is False and body.get("error"):
+        raise HTTPException(status_code=503, detail=str(body["error"]))
+    return body
+
+
 @router.get("/{order_id}")
 def get_order(order_id: str):
     order = service.get_order(order_id)

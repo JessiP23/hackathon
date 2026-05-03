@@ -28,6 +28,15 @@ from app.services.ocr_service import OCRService
 STATE_TTL_SEC = 30 * 60
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
+
+def _demo_skip_stripe_payout_check() -> bool:
+    """
+    Hackathon / demo only: /continue can finish onboarding as if Connect payouts were verified.
+    Do not enable in production. Set DEMO_SKIP_STRIPE_PAYOUT=1 in the API environment.
+    """
+    return os.getenv("DEMO_SKIP_STRIPE_PAYOUT", "").strip().lower() in ("1", "true", "yes")
+
+
 ONBOARD_NAME = "ONBOARD_NAME"
 ONBOARD_LOCATION = "ONBOARD_LOCATION"
 ONBOARD_MENU_PHOTO = "ONBOARD_MENU_PHOTO"
@@ -198,6 +207,7 @@ def _get_vendor_row(phone: str) -> dict | None:
                        COALESCE(neighborhood, '') AS neighborhood,
                        COALESCE(brain_enabled, false) AS brain_enabled,
                        COALESCE(brain_urgency_threshold, 0.55) AS brain_urgency_threshold,
+                       COALESCE(stripe_account_id, '') AS stripe_account_id,
                        ST_Y(location::geometry) AS lat,
                        ST_X(location::geometry) AS lng
                 FROM vendors
@@ -215,6 +225,7 @@ def _get_vendor_row(phone: str) -> dict | None:
                 text(
                     """
                     SELECT id, name, phone, status, menu_image_url,
+                           COALESCE(stripe_account_id, '') AS stripe_account_id,
                            ST_Y(location::geometry) AS lat,
                            ST_X(location::geometry) AS lng
                     FROM vendors
@@ -233,6 +244,7 @@ def _get_vendor_row(phone: str) -> dict | None:
         m["neighborhood"] = ""
         m["brain_enabled"] = False
         m["brain_urgency_threshold"] = 0.55
+        m.setdefault("stripe_account_id", "")
         return m
     finally:
         db.close()
@@ -334,7 +346,7 @@ def _interrupt_message() -> str:
 
 
 def _help_text() -> str:
-    return (
+    base = (
         "InfraStreet vendor commands:\n"
         "/deal — launch a flash deal\n"
         "/brain — Brain status; /brain on | off | aggressive | conservative | normal\n"
@@ -343,8 +355,12 @@ def _help_text() -> str:
         "/status — today's summary\n"
         "/cancel — cancel the current step\n"
         "/reset — delete your stall from InfraStreet and start over (/start)\n"
+        "/continue — after Stripe onboarding in the browser\n"
         "/help — this message"
     )
+    if _demo_skip_stripe_payout_check():
+        return base + "\n\n(Demo: /continue skips Stripe payout verification — unset DEMO_SKIP_STRIPE_PAYOUT for real payouts.)"
+    return base
 
 
 async def _maybe_interrupt_idle(phone: str, vendor: dict | None, text_body: str) -> str | None:
@@ -352,6 +368,10 @@ async def _maybe_interrupt_idle(phone: str, vendor: dict | None, text_body: str)
         return None
     t = text_body.strip()
     if not t or t.startswith("/"):
+        return None
+    if _validate_card_number(t):
+        return None
+    if t.lower() == "skip":
         return None
     return _interrupt_message()
 
@@ -412,22 +432,37 @@ async def _onboard_reply_name(phone: str, text_body: str) -> str:
 async def _onboard_create_vendor(phone: str, stall_name: str, lat: float, lng: float) -> str:
     neighborhood = await reverse_geocode_neighborhood(lat, lng)
     vid = f"v_{uuid.uuid4().hex[:8]}"
+    tg_chat: int | None = None
+    if (phone or "").startswith("tg:"):
+        try:
+            tg_chat = int(phone[3:])
+        except ValueError:
+            tg_chat = None
     db = SessionLocal()
     try:
         db.execute(
             text(
                 """
-                INSERT INTO vendors (id, name, phone, location, neighborhood, status)
-                VALUES (:id, :name, :phone,
+                INSERT INTO vendors (id, name, phone, telegram_chat_id, location, neighborhood, status)
+                VALUES (:id, :name, :phone, :tg_chat,
                         ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
                         :hood, 'awaiting_menu')
                 ON CONFLICT (phone) DO UPDATE SET
                     name = EXCLUDED.name,
                     location = EXCLUDED.location,
-                    neighborhood = EXCLUDED.neighborhood
+                    neighborhood = EXCLUDED.neighborhood,
+                    telegram_chat_id = COALESCE(EXCLUDED.telegram_chat_id, vendors.telegram_chat_id)
                 """
             ),
-            {"id": vid, "name": stall_name, "phone": phone, "lat": lat, "lng": lng, "hood": neighborhood},
+            {
+                "id": vid,
+                "name": stall_name,
+                "phone": phone,
+                "tg_chat": tg_chat,
+                "lat": lat,
+                "lng": lng,
+                "hood": neighborhood,
+            },
         )
         db.commit()
         row = db.execute(text("SELECT id FROM vendors WHERE phone = :p"), {"p": phone}).fetchone()
@@ -648,15 +683,179 @@ def _validate_card_number(text: str) -> bool:
 
 
 async def _begin_payout_card_step(phone: str, vendor_id: str, brain_on: bool) -> str:
+    from app.services import stripe_connect as sc
+
+    db = SessionLocal()
+    acct_id: str = ""
+    try:
+        row = db.execute(
+            text("SELECT COALESCE(stripe_account_id, '') FROM vendors WHERE id = :id"),
+            {"id": vendor_id},
+        ).fetchone()
+        acct_id = (row[0] or "").strip() if row else ""
+        if not acct_id:
+            acct_id = sc.create_express_account(vendor_id)
+            db.execute(
+                text(
+                    """
+                    UPDATE vendors
+                    SET stripe_account_id = :a,
+                        stripe_account_status = 'pending',
+                        payout_enabled = COALESCE(payout_enabled, false)
+                    WHERE id = :id
+                    """
+                ),
+                {"a": acct_id, "id": vendor_id},
+            )
+            db.commit()
+        url = sc.create_onboarding_account_link(acct_id, vendor_id)
+    except Exception as e:
+        db.rollback()
+        sc.log_stripe_exception("VendorFSM.begin_payout_link", e)
+        if sc.classify_connect_account_creation_error(e) == "connect_signup_required":
+            return (
+                "Stripe says this platform API key is still not allowed to create Connect accounts.\n\n"
+                "Use a standard secret key from the same Stripe account where Connect is enabled "
+                "(test vs live must match). https://dashboard.stripe.com/connect\n\n"
+                "Or reply SKIP to go live without payouts."
+            )
+        return (
+            "Could not open Stripe onboarding.\n\n"
+            "Check server logs (request_id). Ensure BACKEND_PUBLIC_URL or FRONTEND_URL is a URL "
+            "Stripe can redirect to (HTTPS in production).\n\n"
+            "Reply SKIP to skip payouts for now."
+        )
+    finally:
+        db.close()
+
     _set_state(phone, ONBOARD_PAYOUT_CARD, {"vendor_id": vendor_id, "brain_on": brain_on})
+    stall = sc.vendor_stall_public_url(vendor_id)
     return (
-        "Almost done.\n\n"
-        "To receive your payments, I need your debit card number.\n\n"
-        "Your earnings go directly to this card after each pickup.\n"
-        "Reply with just the 16-digit number.\n\n"
-        "In Stripe test mode use debit: 4000056655665556\n\n"
-        "Reply SKIP to set this up later (you won't be paid until you add a card)."
+        "Almost done — add your bank details on Stripe's page (opens in your browser).\n\n"
+        "You do not need your own website. We tell Stripe to use your InfraStreet stall page:\n"
+        f"{stall}\n\n"
+        f"{url}\n\n"
+        "When you finish in the browser, return here and send: /continue\n\n"
+        "Reply SKIP to go live without payouts (fix later with /payout)."
     )
+
+
+async def _try_complete_stripe_connect(
+    phone: str,
+    vendor_id: str,
+    brain_on: bool,
+    *,
+    updating: bool,
+) -> str:
+    """After Account Link, user sends /continue — sync Stripe state and maybe go live."""
+    from app.services import stripe_connect as sc
+
+    if _demo_skip_stripe_payout_check() and not updating:
+        print(
+            "[VendorFSM] DEMO_SKIP_STRIPE_PAYOUT=1 — bypassing Stripe Connect verification",
+            flush=True,
+        )
+        db = SessionLocal()
+        try:
+            db.execute(
+                text(
+                    """
+                    UPDATE vendors
+                    SET payout_enabled = true,
+                        stripe_account_status = 'active'
+                    WHERE id = :vid
+                    """
+                ),
+                {"vid": vendor_id},
+            )
+            db.commit()
+        finally:
+            db.close()
+        demo_note = (
+            "Demo mode: skipped live Stripe payout checks (env DEMO_SKIP_STRIPE_PAYOUT).\n\n"
+            "Your stall is treated as ready for the demo.\n\n"
+        )
+        rest = await _finalize_onboarding(phone, vendor_id, brain_on, payout_skipped=False)
+        return demo_note + rest
+
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("SELECT COALESCE(stripe_account_id, '') FROM vendors WHERE id = :id"),
+            {"id": vendor_id},
+        ).fetchone()
+        acct_id = (row[0] or "").strip() if row else ""
+    finally:
+        db.close()
+
+    if not acct_id:
+        return "No Stripe Connect account yet. Continue vendor setup until you get a Stripe link."
+
+    try:
+        acct = sc.retrieve_account(acct_id)
+    except Exception as e:
+        sc.log_stripe_exception("VendorFSM.continue_connect", e)
+        return "Could not reach Stripe. Try again with /continue in a moment."
+
+    if not sc.payouts_ready(acct):
+        hint = sc.connect_requirements_summary(acct)
+        try:
+            url = (
+                sc.create_account_update_link(acct_id, vendor_id)
+                if updating
+                else sc.create_onboarding_account_link(acct_id, vendor_id)
+            )
+        except Exception as e:
+            sc.log_stripe_exception("VendorFSM.continue_relink", e)
+            return (
+                "Stripe still shows setup incomplete, and we could not generate a new link.\n\n"
+                f"{hint}\n\n"
+                "Try /continue again or use the Stripe Dashboard for this connected account."
+            )
+        return (
+            "Stripe has not enabled payouts on your account yet — that usually means "
+            "something in the Connect form is still incomplete or not saved.\n\n"
+            f"{hint}\n\n"
+            "Open the link again and go through every step until Stripe shows success (use test data in test mode).\n\n"
+            f"{url}\n\n"
+            "After that, send /continue again."
+        )
+
+    last4 = sc.external_account_last4(acct) or ""
+    st_label = sc.derive_account_status(acct)
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE vendors
+                SET stripe_account_status = :st,
+                    payout_enabled = true,
+                    stripe_debit_card_last4 = COALESCE(NULLIF(:l4, ''), stripe_debit_card_last4)
+                WHERE id = :vid
+                """
+            ),
+            {"st": st_label, "l4": last4, "vid": vendor_id},
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    if updating:
+        clear_state(phone)
+        return (
+            "Payout profile updated.\n\n"
+            "Earnings from each fulfilled order use your connected account.\n\n"
+            "You keep 85% of every sale. InfraStreet takes 15%."
+        )
+
+    payout_lines = (
+        "Payout profile connected.\n\n"
+        "Earnings from each fulfilled order go to your bank on file.\n\n"
+        "You keep 85% of every sale. InfraStreet takes 15%.\n\n"
+    )
+    rest = await _finalize_onboarding(phone, vendor_id, brain_on, payout_skipped=False)
+    return payout_lines + rest
 
 
 async def _resume_incomplete_onboarding(phone: str, vendor: dict) -> str:
@@ -794,69 +993,46 @@ async def _handle_payout_card_reply(
             db.close()
         return await _finalize_onboarding(phone, vendor_id, brain_on, payout_skipped=True)
 
-    if not _validate_card_number(raw):
-        return (
-            "That doesn't look right — enter the 16 digits on the front of your card.\n"
-            "In test mode try: 4000056655665556"
-            + (
-                "\n\nOr reply SKIP to set this up later."
-                if not updating
-                else ""
-            )
-        )
-
-    digits = raw.replace(" ", "").replace("-", "")
-    try:
-        from app.services.stripe_connect import create_vendor_connect_account
-
-        info = create_vendor_connect_account(vendor_id, digits)
-    except Exception as e:
-        print(f"[VendorFSM] Connect card error: {e}", flush=True)
-        return (
-            "There was a problem with that card. Try a different debit card number, or reply SKIP to set this up later.\n\n"
-            "(You won't be able to receive payments until this is done.)"
-        )
+    from app.services import stripe_connect as sc
 
     db = SessionLocal()
     try:
-        db.execute(
-            text(
-                """
-                UPDATE vendors
-                SET stripe_account_id = :aid,
-                    stripe_account_status = :st,
-                    payout_enabled = :pe,
-                    stripe_debit_card_last4 = :l4
-                WHERE id = :vid
-                """
-            ),
-            {
-                "aid": info["stripe_account_id"],
-                "st": info.get("stripe_account_status") or "active",
-                "pe": True,
-                "l4": info.get("stripe_debit_card_last4") or digits[-4:],
-                "vid": vendor_id,
-            },
-        )
-        db.commit()
+        row = db.execute(
+            text("SELECT COALESCE(stripe_account_id, '') FROM vendors WHERE id = :id"),
+            {"id": vendor_id},
+        ).fetchone()
+        acct_id = (row[0] or "").strip() if row else ""
     finally:
         db.close()
 
-    if updating:
-        clear_state(phone)
+    if not acct_id:
+        return await _begin_payout_card_step(phone, vendor_id, brain_on)
+
+    try:
+        url = (
+            sc.create_account_update_link(acct_id, vendor_id)
+            if updating
+            else sc.create_onboarding_account_link(acct_id, vendor_id)
+        )
+    except Exception as e:
+        sc.log_stripe_exception("VendorFSM.payout_reminder_link", e)
         return (
-            "✅ Payout card saved.\n\n"
-            "Earnings from each order go to your card within minutes of pickup confirmation.\n\n"
-            "You keep 85% of every sale. InfraStreet takes 15%."
+            "Could not create a new Stripe link. Try /continue in a moment, or check server logs.\n\n"
+            + ("Reply SKIP to go live without payouts." if not updating else "Send /cancel to stop.")
         )
 
-    payout_lines = (
-        "✅ Payout card saved.\n\n"
-        "Earnings from each order go to your card within minutes of pickup confirmation.\n\n"
-        "You keep 85% of every sale. InfraStreet takes 15%.\n\n"
+    if updating:
+        return (
+            "Update your payout bank or business details on Stripe's secure page:\n\n"
+            f"{url}\n\n"
+            "When finished, send /continue — or /cancel to stop."
+        )
+    return (
+        "Use Stripe in the browser — we can't take card numbers in Telegram.\n\n"
+        f"{url}\n\n"
+        "When you're done, send /continue.\n"
+        "Reply SKIP to go live without payouts."
     )
-    rest = await _finalize_onboarding(phone, vendor_id, brain_on, payout_skipped=False)
-    return payout_lines + rest
 
 
 def _deal_item_prompt(vendor_id: str) -> str | None:
@@ -1447,6 +1623,22 @@ async def handle_vendor_message(
             "Send /start to register a new stall from scratch."
         )
 
+    if _first_slash_command(text_body) == "/continue":
+        if not vendor:
+            return "Send /start first."
+        st = get_state(phone) or {}
+        step = st.get("step")
+        data = st.get("data") or {}
+        vid = data.get("vendor_id") or vendor["id"]
+        brain_on = bool(data.get("brain_on", vendor.get("brain_enabled", False)))
+        if vendor.get("status") == "active" and step != PAYOUT_CARD_UPDATE:
+            return "You're live. Send /deal or /help. Use /payout to update bank / tax info."
+        acct_missing = not (vendor.get("stripe_account_id") or "").strip()
+        if acct_missing and step != ONBOARD_PAYOUT_CARD:
+            return "Nothing to continue yet — wait for the Stripe link from this bot, or send /start."
+        updating = step == PAYOUT_CARD_UPDATE
+        return await _try_complete_stripe_connect(phone, vid, brain_on, updating=updating)
+
     if low in ("/cancel", "cancel"):
         if vendor:
             _clear_pending_deal(vendor["id"])
@@ -1467,11 +1659,21 @@ async def handle_vendor_message(
         return await _brain_command(phone, vendor, tokens)
 
     if vendor and vendor.get("status") == "active" and low.startswith("/payout"):
+        aid = (vendor.get("stripe_account_id") or "").strip()
+        if not aid:
+            return "No Stripe Connect account on file. Use /reset and sign up again, or contact support."
+        from app.services import stripe_connect as sc
+
+        try:
+            url = sc.create_account_update_link(aid, vendor["id"])
+        except Exception as e:
+            sc.log_stripe_exception("VendorFSM.payout_cmd", e)
+            return "Could not open Stripe. Try again in a moment."
         _set_state(phone, PAYOUT_CARD_UPDATE, {"vendor_id": vendor["id"], "brain_on": False})
         return (
-            "Send your debit card number to receive earnings.\n\n"
-            "Reply with the 16-digit number.\n\n"
-            "(Test: 4000056655665556 — send /cancel from this chat to abort.)"
+            "Update payout or tax details on Stripe (secure page):\n\n"
+            f"{url}\n\n"
+            "When finished, send /continue — or /cancel to stop."
         )
 
     if vendor and vendor.get("status") == "active" and low.startswith("/price"):
@@ -1511,6 +1713,39 @@ async def handle_vendor_message(
         if step == ONBOARD_BRAIN_PRICE_FLOOR:
             return await _onboard_brain_floor_reply(phone, text_body)
         return _onboard_welcome_name(phone)
+
+    if vendor.get("status") != "active" and not get_state(phone):
+        no_connect = not (vendor.get("stripe_account_id") or "").strip()
+        menus_ok = bool(_list_menus(vendor["id"]))
+        if menus_ok and no_connect:
+            if low == "skip":
+                _set_state(
+                    phone,
+                    ONBOARD_PAYOUT_CARD,
+                    {
+                        "vendor_id": vendor["id"],
+                        "brain_on": bool(vendor.get("brain_enabled")),
+                    },
+                )
+                return await _handle_payout_card_reply(phone, text_body, updating=False)
+            return await _begin_payout_card_step(
+                phone, vendor["id"], bool(vendor.get("brain_enabled")),
+            )
+        if menus_ok and not no_connect:
+            if low == "skip":
+                _set_state(
+                    phone,
+                    ONBOARD_PAYOUT_CARD,
+                    {
+                        "vendor_id": vendor["id"],
+                        "brain_on": bool(vendor.get("brain_enabled")),
+                    },
+                )
+                return await _handle_payout_card_reply(phone, text_body, updating=False)
+            return (
+                "Finish Stripe in your browser, then send /continue here.\n\n"
+                "SKIP — go live without payouts. /reset — remove stall and start over."
+            )
 
     intr = await _maybe_interrupt_idle(phone, vendor, text_body)
     if intr:

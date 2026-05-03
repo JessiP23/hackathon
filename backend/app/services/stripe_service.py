@@ -18,6 +18,89 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 
+def _checkout_session_metadata(sess) -> dict:
+    """Avoid dict() on StripeObjects (can raise KeyError / break on nested objects)."""
+    try:
+        if isinstance(sess, dict):
+            raw = sess.get("metadata")
+        else:
+            raw = getattr(sess, "metadata", None)
+        if raw is None:
+            return {}
+        if isinstance(raw, dict):
+            return {str(k): v for k, v in raw.items()}
+        for meth in ("to_dict_recursive", "to_dict"):
+            fn = getattr(raw, meth, None)
+            if callable(fn):
+                d = fn()
+                if isinstance(d, dict):
+                    return {str(k): v for k, v in d.items()}
+    except Exception as ex:
+        print(f"[Stripe] checkout session metadata: {type(ex).__name__}: {ex}", flush=True)
+    return {}
+
+
+def _checkout_session_status(sess) -> str | None:
+    if isinstance(sess, dict):
+        return sess.get("status")
+    return getattr(sess, "status", None)
+
+
+def _checkout_sessions_list_scan(*, order_id: str, status: str, max_pages: int = 5):
+    """
+    stripe-python has no checkout.Session.search; scan recent Session.list pages.
+    Fine for test accounts and moderate traffic.
+    """
+    if not STRIPE_OK:
+        return None
+    starting_after = None
+    for _ in range(max_pages):
+        params: dict = {"limit": 100}
+        if starting_after:
+            params["starting_after"] = starting_after
+        page = stripe.checkout.Session.list(**params)
+        for s in getattr(page, "data", None) or []:
+            meta = _checkout_session_metadata(s)
+            if str(meta.get("order_id") or "") != str(order_id):
+                continue
+            if _checkout_session_status(s) == status:
+                return s
+        if not getattr(page, "has_more", False):
+            break
+        rows = getattr(page, "data", None) or []
+        if not rows:
+            break
+        last = rows[-1]
+        starting_after = last if isinstance(last, str) else getattr(last, "id", None)
+    return None
+
+
+def checkout_session_payment_intent_id(sess) -> str | None:
+    if not sess:
+        return None
+    pi_raw = (
+        sess.get("payment_intent")
+        if isinstance(sess, dict)
+        else getattr(sess, "payment_intent", None)
+    )
+    if isinstance(pi_raw, dict):
+        i = pi_raw.get("id")
+        return str(i) if i else None
+    return str(pi_raw) if pi_raw else None
+
+
+def checkout_session_is_paid(sess) -> bool:
+    if not sess:
+        return False
+    st = sess.get("status") if isinstance(sess, dict) else getattr(sess, "status", None)
+    ps = (
+        sess.get("payment_status")
+        if isinstance(sess, dict)
+        else getattr(sess, "payment_status", None)
+    )
+    return st == "complete" and ps == "paid"
+
+
 class StripeService:
     def create_checkout_session(
         self,
@@ -74,6 +157,31 @@ class StripeService:
             },
         )
         return {"checkout_url": session.url, "session_id": session.id}
+
+    def find_open_checkout_session_for_order(self, order_id: str) -> dict | None:
+        """Reuse an existing open Hosted Checkout session if one exists (same metadata order_id)."""
+        if not STRIPE_OK:
+            return None
+        try:
+            s = _checkout_sessions_list_scan(order_id=order_id, status="open", max_pages=5)
+            if s:
+                url = getattr(s, "url", None) if not isinstance(s, dict) else s.get("url")
+                sid = getattr(s, "id", None) if not isinstance(s, dict) else s.get("id")
+                if url and sid:
+                    return {"checkout_url": url, "session_id": sid}
+        except Exception as e:
+            print(f"[Stripe] find_open_checkout_session_for_order: {e}", flush=True)
+        return None
+
+    def find_complete_checkout_session_for_order(self, order_id: str):
+        """Completed Hosted Checkout for order_id (metadata), for webhook-missed sync."""
+        if not STRIPE_OK:
+            return None
+        try:
+            return _checkout_sessions_list_scan(order_id=order_id, status="complete", max_pages=8)
+        except Exception as e:
+            print(f"[Stripe] find_complete_checkout_session_for_order: {type(e).__name__}: {e}", flush=True)
+            return None
 
     def verify_webhook(self, payload: bytes, sig_header: str):
         """Verify Stripe webhook signature and return event dict, or None on failure."""

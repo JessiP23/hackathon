@@ -254,3 +254,11 @@ ALTER TABLE orders ADD CONSTRAINT orders_status_check CHECK (status IN (
     'fulfilled','refunded','reserved_unpaid','no_show','pending',
     'confirmed','ready','cancelled'
 ));
+
+-- Vendor Telegram (stall order alerts use bot only; no Twilio for vendors)
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS telegram_chat_id BIGINT NULL;
+CREATE INDEX IF NOT EXISTS vendors_telegram_chat_id_idx
+    ON vendors(telegram_chat_id) WHERE telegram_chat_id IS NOT NULL;
+
+-- Hosted Checkout: sync + retrieve without scanning Session.list
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS stripe_checkout_session_id VARCHAR(128);

@@ -27,6 +27,35 @@ def _short_link_base() -> str:
     ).rstrip("/")
 
 
+def _vendor_telegram_route(phone: str | None) -> str | None:
+    """
+    Resolve how to reach the vendor on Telegram. Vendors do not use Twilio for order alerts.
+    """
+    p = (phone or "").strip()
+    if not p:
+        return None
+    if p.startswith("tg:") and len(p) > 3:
+        try:
+            int(p[3:])
+            return p
+        except ValueError:
+            return None
+    db = SessionLocal()
+    try:
+        try:
+            row = db.execute(
+                text("SELECT telegram_chat_id FROM vendors WHERE phone = :p LIMIT 1"),
+                {"p": p},
+            ).fetchone()
+        except Exception:
+            return None
+        if row and row[0] is not None:
+            return f"tg:{int(row[0])}"
+    finally:
+        db.close()
+    return None
+
+
 class NotifyService:
     def __init__(self):
         self._client = (
@@ -42,9 +71,17 @@ class NotifyService:
         channel: str = "customer",
         reply_markup: dict | None = None,
     ) -> dict:
-        if phone.startswith("tg:") and channel == "vendor":
-            return await self._send_telegram_chat(phone, message, reply_markup=reply_markup)
-        service_sid = TWILIO_VENDOR_SID if channel == "vendor" else TWILIO_CUSTOMER_SID
+        if channel == "vendor":
+            route = _vendor_telegram_route(phone)
+            token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+            if route and token:
+                return await self._send_telegram_chat(route, message, reply_markup=reply_markup)
+            print(
+                f"[Vendor notify] skipped — set TELEGRAM_BOT_TOKEN and ensure vendor is linked (tg:… phone or telegram_chat_id): {phone!r}",
+                flush=True,
+            )
+            return {"sent": False, "skipped": True, "reason": "vendor_telegram_only"}
+        service_sid = TWILIO_CUSTOMER_SID
         return await self._send_twilio(phone, message, service_sid)
 
     async def _send_telegram_chat(
@@ -242,11 +279,28 @@ class NotifyService:
         )
         await self.send_message(vendor_phone, body, "vendor")
 
+    def _schedule_send_message(
+        self,
+        phone: str,
+        message: str,
+        channel: str = "customer",
+        reply_markup: dict | None = None,
+    ) -> None:
+        """Fire async send from sync callers (main async route vs AnyIO worker thread)."""
+        coro = self.send_message(phone, message, channel, reply_markup=reply_markup)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                asyncio.run(coro)
+            except Exception as e:
+                print(f"[Notify] _schedule_send_message: {e}", flush=True)
+        else:
+            loop.create_task(coro)
+
     def notify_vendor_order(self, vendor_phone: str, message: str):
         print(f"[Vendor notify] {vendor_phone}: {message[:120]}")
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.create_task(self.send_message(vendor_phone, message, "vendor"))
+        self._schedule_send_message(vendor_phone, message, "vendor")
         return {"sent": True, "phone": vendor_phone}
 
     def notify_customer_confirmation(self, customer_phone: str, message: str):
@@ -255,9 +309,7 @@ class NotifyService:
             customer_phone,
             {"type": "order", "subType": "alert", "body": message[:800]},
         )
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.create_task(self.send_message(customer_phone, message, "customer"))
+        self._schedule_send_message(customer_phone, message, "customer")
         return {"sent": True, "phone": customer_phone}
 
     async def _send_twilio(self, phone: str, message: str, service_sid: str, retry: int = 0) -> dict:

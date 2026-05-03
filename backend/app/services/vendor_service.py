@@ -17,8 +17,8 @@ class VendorService:
             vendor_id = f"v_{uuid.uuid4().hex[:8]}"
             db.execute(
                 text("""
-                    INSERT INTO vendors (id, name, phone, location, business_hours)
-                    VALUES (:id, :name, :phone,
+                    INSERT INTO vendors (id, name, phone, telegram_chat_id, location, business_hours)
+                    VALUES (:id, :name, :phone, NULL,
                             ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
                             :hours)
                 """),

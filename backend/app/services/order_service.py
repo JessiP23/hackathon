@@ -332,6 +332,22 @@ class OrderService:
             db.close()
         return {"ok": True}
 
+    def _update_order_checkout_session_id(self, order_id: str, session_id: str | None) -> None:
+        if not session_id:
+            return
+        db = SessionLocal()
+        try:
+            db.execute(
+                text("UPDATE orders SET stripe_checkout_session_id = :sid WHERE id = :oid"),
+                {"sid": session_id, "oid": order_id},
+            )
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"[orders] stripe_checkout_session_id: {e}", flush=True)
+        finally:
+            db.close()
+
     # ── Menu cart checkout (Stripe, same fee + points model as flash deals) ─
     def create_order(self, payload) -> dict:
         from app.services.user_service import UserService
@@ -438,6 +454,8 @@ class OrderService:
             points_discount=discount,
             deal_id=None,
         )
+        if checkout.get("session_id"):
+            self._update_order_checkout_session_id(order_id, checkout.get("session_id"))
 
         return {
             "orderId": order_id,
@@ -476,6 +494,7 @@ class OrderService:
                 "pickupCode": r.pickup_code,
                 "pickupQrCode": getattr(r, "pickup_qr_code", None),
                 "stripePaymentIntent": getattr(r, "stripe_payment_intent", None),
+                "stripeCheckoutSessionId": getattr(r, "stripe_checkout_session_id", None),
                 "stripeCaptureMethod": getattr(r, "stripe_capture_method", None),
                 "stripeCapturedAt": cap.isoformat() if cap else None,
                 "customerNoShow": bool(getattr(r, "customer_no_show", None)),
@@ -485,6 +504,261 @@ class OrderService:
             return out
         finally:
             db.close()
+
+    def get_deal_checkout_session(self, order_id: str) -> dict:
+        """Return Stripe client_secret for an order still in pending_payment (e.g. after refresh)."""
+        from app.services.payments import STRIPE_OK
+
+        import stripe
+
+        order = self.get_order(order_id)
+        if not order:
+            return {"error": "Order not found"}
+        if order.get("status") != "pending_payment":
+            return {"error": "Order is not awaiting payment"}
+        pi_id = order.get("stripePaymentIntent")
+        if not pi_id:
+            return {"error": "No payment session for this order"}
+        if not STRIPE_OK:
+            return {"error": "Card payments are not configured."}
+        stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "").strip()
+        try:
+            pi = stripe.PaymentIntent.retrieve(pi_id)
+        except Exception as e:
+            print(f"[orders] get_deal_checkout_session PI retrieve: {e}", flush=True)
+            return {"error": "Could not load payment. Try a new reservation from the deal."}
+        if pi.status in ("succeeded", "canceled"):
+            return {"error": "Payment already completed or canceled."}
+        # After successful auth, webhooks move the order to `pending`; if we still see
+        # requires_capture with pending_payment, treat as unusable for Elements resume.
+        if pi.status == "requires_capture":
+            return {"error": "Payment already authorized. Open your order from Orders."}
+        if not pi.client_secret:
+            return {"error": "Payment session is no longer available."}
+
+        phone = order.get("customerPhone")
+        trust_level = 0
+        if phone:
+            db = SessionLocal()
+            try:
+                crow = db.execute(
+                    text(
+                        """
+                        SELECT COALESCE(trust_level, 0) FROM customers
+                        WHERE phone IN (:p1, :p2) LIMIT 1
+                        """
+                    ),
+                    {"p1": _normalize_phone(phone), "p2": phone},
+                ).fetchone()
+                if crow is not None:
+                    trust_level = int(crow[0] or 0)
+            finally:
+                db.close()
+
+        publishable = os.getenv("STRIPE_PUBLISHABLE_KEY", "").strip()
+        return {
+            "orderId": order_id,
+            "clientSecret": pi.client_secret,
+            "publishableKey": publishable,
+            "trustLevel": trust_level,
+        }
+
+    def get_hosted_checkout_url(self, order_id: str) -> dict:
+        """Resume Stripe Hosted Checkout for menu/cart orders (no PaymentIntent on row until paid)."""
+        from app.services.stripe_service import stripe_service
+
+        order = self.get_order(order_id)
+        if not order:
+            return {"error": "Order not found"}
+        if order.get("status") != "pending_payment":
+            return {"error": "Order is not awaiting payment"}
+        if order.get("dealId"):
+            return {"error": "This order uses in-app card payment, not Stripe Checkout."}
+
+        existing = stripe_service.find_open_checkout_session_for_order(order_id)
+        if existing and existing.get("checkout_url"):
+            sid = existing.get("session_id")
+            if sid:
+                self._update_order_checkout_session_id(order_id, sid)
+            return {"checkoutUrl": existing["checkout_url"], "orderId": order_id}
+
+        items = order.get("items") or []
+        vendor_subtotal = 0.0
+        for i in items:
+            vendor_subtotal += float(i.get("price") or 0) * int(i.get("quantity", 1))
+        if not items:
+            return {"error": "Order has no line items"}
+
+        sf = float(order.get("serviceFee") or 0)
+        total = float(order.get("total") or 0)
+        pre = vendor_subtotal + sf
+        points_discount = max(0.0, round(pre - total, 2))
+
+        n = len(items)
+        if n == 1:
+            stripe_label = (items[0].get("name") or "Order")[:120]
+        else:
+            vendor_name = order.get("vendorName") or "Vendor"
+            first = (items[0].get("name") or "Item")[:80]
+            stripe_label = f"{first} + {n - 1} more ({vendor_name})"
+
+        total_qty = sum(int(i.get("quantity", 1)) for i in items)
+        vendor_id = order.get("vendorId")
+        if not vendor_id:
+            return {"error": "Order has no vendor"}
+
+        checkout = stripe_service.create_checkout_session(
+            order_id=order_id,
+            vendor_id=vendor_id,
+            item_name=stripe_label[:120],
+            quantity=max(1, total_qty),
+            vendor_price=vendor_subtotal,
+            points_discount=points_discount,
+            deal_id=None,
+        )
+        err = checkout.get("error")
+        if err:
+            return {"error": str(err)}
+        url = checkout.get("checkout_url")
+        if not url:
+            return {"error": "Could not start checkout."}
+        if checkout.get("session_id"):
+            self._update_order_checkout_session_id(order_id, checkout.get("session_id"))
+        return {"checkoutUrl": url, "orderId": order_id}
+
+    def sync_order_if_checkout_completed(self, order_id: str) -> dict:
+        """If Hosted Checkout finished but `checkout.session.completed` was missed, sync from Stripe."""
+        order = self.get_order(order_id)
+        if not order:
+            return {"ok": False, "error": "Order not found"}
+        if (order.get("status") or "").lower() != "pending_payment":
+            return {"ok": True, "synced": False, "status": order.get("status")}
+
+        try:
+            import stripe
+        except ImportError:
+            return {"ok": False, "error": "Stripe not available"}
+
+        stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "").strip()
+        if not stripe.api_key:
+            return {"ok": False, "error": "Stripe not configured"}
+
+        try:
+            from app.services.stripe_service import (
+                checkout_session_is_paid,
+                checkout_session_payment_intent_id,
+                stripe_service,
+            )
+            import stripe
+
+            sess = None
+            cs_id = order.get("stripeCheckoutSessionId")
+            if cs_id:
+                try:
+                    sess = stripe.checkout.Session.retrieve(cs_id)
+                except Exception as e:
+                    print(f"[orders] Session.retrieve {cs_id}: {e}", flush=True)
+            if not sess:
+                sess = stripe_service.find_complete_checkout_session_for_order(order_id)
+
+            if not sess:
+                return {"ok": True, "synced": False}
+            if not checkout_session_is_paid(sess):
+                st = sess.get("status") if isinstance(sess, dict) else getattr(sess, "status", None)
+                ps = (
+                    sess.get("payment_status")
+                    if isinstance(sess, dict)
+                    else getattr(sess, "payment_status", None)
+                )
+                return {"ok": True, "synced": False, "checkoutStatus": st, "paymentStatus": ps}
+
+            pi_id = checkout_session_payment_intent_id(sess)
+            if not pi_id:
+                return {"ok": True, "synced": False, "message": "No payment on checkout session"}
+            out = dict(self.on_payment_succeeded(order_id, str(pi_id)))
+            out["synced"] = True
+            out["ok"] = True
+            return out
+        except Exception as e:
+            print(f"[orders] sync_order_if_checkout_completed: {e}", flush=True)
+            return {"ok": False, "error": str(e)}
+
+    def ack_deal_payment_authorized(self, order_id: str) -> dict:
+        """
+        After PaymentElement confirms (manual capture → requires_capture, or automatic → succeeded),
+        move order to `pending` and notify the vendor when Stripe webhooks did not run (e.g. localhost).
+        """
+        import stripe
+
+        order = self.get_order(order_id)
+        if not order:
+            return {"ok": False, "error": "Order not found"}
+        if (order.get("status") or "").lower() != "pending_payment":
+            return {"ok": True, "updated": False, "status": order.get("status")}
+        pi_id = order.get("stripePaymentIntent")
+        if not pi_id or not order.get("dealId"):
+            return {"ok": True, "updated": False}
+
+        stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "").strip()
+        if not stripe.api_key:
+            return {"ok": False, "error": "Stripe not configured"}
+        try:
+            pi = stripe.PaymentIntent.retrieve(pi_id)
+        except Exception as e:
+            print(f"[orders] ack_deal_payment_authorized PI: {e}", flush=True)
+            return {"ok": False, "error": str(e)}
+
+        cm = (getattr(pi, "capture_method", None) or "").lower()
+        updated = False
+
+        if cm == "manual":
+            amt = int(getattr(pi, "amount_capturable", 0) or 0)
+            if getattr(pi, "status", None) == "requires_capture" and amt > 0:
+                db = SessionLocal()
+                try:
+                    res = db.execute(
+                        text(
+                            """
+                            UPDATE orders
+                            SET status = 'pending',
+                                stripe_payment_intent = COALESCE(stripe_payment_intent, :pi)
+                            WHERE id = :oid AND status = 'pending_payment'
+                            """
+                        ),
+                        {"oid": order_id, "pi": pi_id},
+                    )
+                    db.commit()
+                    updated = (res.rowcount or 0) > 0
+                finally:
+                    db.close()
+                if updated:
+                    self.notify_vendor_new_reservation(order_id)
+            return {"ok": True, "updated": updated, "pi_status": getattr(pi, "status", None)}
+
+        if cm == "automatic" and getattr(pi, "status", None) == "succeeded":
+            db = SessionLocal()
+            try:
+                res = db.execute(
+                    text(
+                        """
+                        UPDATE orders
+                        SET status = 'pending',
+                            stripe_payment_intent = COALESCE(stripe_payment_intent, :pi),
+                            stripe_captured_at = COALESCE(stripe_captured_at, NOW())
+                        WHERE id = :oid AND status = 'pending_payment'
+                        """
+                    ),
+                    {"oid": order_id, "pi": pi_id},
+                )
+                db.commit()
+                updated = (res.rowcount or 0) > 0
+            finally:
+                db.close()
+            if updated:
+                self.notify_vendor_new_reservation(order_id)
+            return {"ok": True, "updated": updated, "pi_status": "succeeded"}
+
+        return {"ok": True, "updated": False, "pi_status": getattr(pi, "status", None)}
 
     def flag_order_for_review(self, order_id: str | None, reason: str) -> None:
         if not order_id:
@@ -556,15 +830,23 @@ class OrderService:
             db2.close()
 
         async def _send():
-            await telegram_notify.notify_vendor_order_received(
-                m.get("vendor_phone"),
-                line,
-                qty,
-                order_id,
-                first,
-            )
+            try:
+                await telegram_notify.notify_vendor_order_received(
+                    m.get("vendor_phone"),
+                    line,
+                    qty,
+                    order_id,
+                    first,
+                )
+            except Exception as e:
+                print(f"[orders] notify_vendor_new_reservation: {e}", flush=True)
 
-        asyncio.run(_send())
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(_send())
+        else:
+            loop.create_task(_send())
 
     def get_order_receipt_url(self, order_id: str) -> dict | None:
         """Resolve Stripe receipt URL if payment was captured; callers fall back to in-app receipt."""

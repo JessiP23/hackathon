@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
 from app.db import SessionLocal
 from app.services.order_service import OrderService
@@ -11,6 +12,38 @@ from app.services.stripe_service import stripe_service
 from sqlalchemy import text
 
 router = APIRouter()
+
+_RETURN_HTML = """<!DOCTYPE html><html><head><meta charset="utf-8"/><title>InfraStreet</title></head>
+<body style="font-family:system-ui;padding:2rem;max-width:32rem;line-height:1.5">
+<p><strong>Stripe onboarding is complete (or you closed the flow).</strong></p>
+<p>Return to the InfraStreet bot in Telegram and send <code>/continue</code> so we can mark your stall as live.</p>
+<p>If the bot says Stripe still needs info, open the <strong>new</strong> connect.stripe.com link it sends you and finish every step (business details, bank link, identity, terms).</p>
+</body></html>"""
+
+_REFRESH_HTML = """<!DOCTYPE html><html><head><meta charset="utf-8"/><title>InfraStreet</title></head>
+<body style="font-family:system-ui;padding:2rem;max-width:32rem;line-height:1.5">
+<p><strong>This is not your signup page.</strong></p>
+<p>Stripe only sends you here if an onboarding <em>session</em> had to be restarted, or if you opened this URL directly from a bookmark.</p>
+<p>To finish payouts, always use the long <strong>connect.stripe.com/setup/…</strong> link from the Telegram bot. After you submit that form, Stripe sends you to the &quot;almost done&quot; page — then go back to Telegram and send <code>/continue</code>.</p>
+<p>If you are stuck, open Telegram and send <code>/continue</code> so the bot can send a fresh Stripe link.</p>
+</body></html>"""
+
+
+@router.get("/stripe/connect/return", response_class=HTMLResponse)
+def stripe_connect_return():
+    """
+    Stripe Account Link return_url (Express onboarding / update).
+    User must send /continue in Telegram so the bot can sync DB when payouts_enabled flips.
+    """
+    return HTMLResponse(_RETURN_HTML)
+
+
+@router.get("/stripe/connect/refresh", response_class=HTMLResponse)
+def stripe_connect_refresh():
+    """Stripe Account Link refresh_url."""
+    return HTMLResponse(_REFRESH_HTML)
+
+
 order_service = OrderService()
 
 STRIPE_CONNECT_SECRET = os.getenv("STRIPE_CONNECT_WEBHOOK_SECRET", "").strip()
@@ -30,6 +63,16 @@ def _pi_obj(raw) -> dict:
 def _order_id_from_pi(obj: dict) -> str | None:
     meta = obj.get("metadata") or {}
     return meta.get("infrastreet_order_id") or meta.get("order_id")
+
+
+def _payment_intent_id(val) -> str | None:
+    if val is None:
+        return None
+    if isinstance(val, str):
+        return val or None
+    if isinstance(val, dict):
+        return val.get("id")
+    return getattr(val, "id", None)
 
 
 @router.post("/webhook/stripe")
@@ -77,9 +120,9 @@ async def stripe_webhook(request: Request):
             order_service.on_payment_failed(order_id)
 
     elif event_type == "checkout.session.completed":
-        metadata = obj.get("metadata", {})
+        metadata = obj.get("metadata", {}) or {}
         order_id = metadata.get("order_id")
-        pi_id = obj.get("payment_intent")
+        pi_id = _payment_intent_id(obj.get("payment_intent"))
         if order_id and pi_id:
             order_service.on_payment_succeeded(order_id, pi_id)
 
