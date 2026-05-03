@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, startTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getCurrentLocation } from "@/app/services/location";
@@ -48,11 +48,11 @@ export default function DealsPage() {
       .then(async (loc) => {
         setLocation(loc);
         const data = await getDealsNearby(loc.lat, loc.lng);
-        setDeals(data);
+        startTransition(() => setDeals(data));
       })
       .catch(async () => {
         const data = await getDealsNearby(40.7128, -74.006);
-        setDeals(data);
+        startTransition(() => setDeals(data));
       })
       .finally(() => setLoading(false));
   }, []);
@@ -291,12 +291,13 @@ export default function DealsPage() {
                 deal={deal}
                 stackIndex={i}
                 isTop={i === 0}
+                userLocation={location}
                 onReserve={handleReserve}
                 onSwipeNext={onSwipeNext}
               />
             ))}
             <p className="pointer-events-none absolute right-0 bottom-8 left-0 z-40 text-center text-[11px] text-[var(--is-text-4)] [padding-bottom:env(safe-area-inset-bottom)]">
-              Swipe up next · Swipe right save
+              Swipe details left (next) or right (save) — map stays put
             </p>
           </div>
         )}
