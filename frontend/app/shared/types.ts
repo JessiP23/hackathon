@@ -56,8 +56,10 @@ export interface Order {
   status: string;
   items: { name: string; quantity: number; price?: number }[];
   total?: number;
+  serviceFee?: number;
   pickupCode?: string;
   checkoutUrl?: string;
+  stripePaymentIntent?: string | null;
   createdAt?: string;
 }
 
