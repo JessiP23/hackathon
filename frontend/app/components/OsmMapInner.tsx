@@ -1,9 +1,20 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { Location, Vendor } from "@/app/shared/types";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+
+function structuralKey(userLocation: Location | null, vendors: Vendor[]): string {
+  const u =
+    userLocation != null ? `u:${userLocation.lat.toFixed(5)},${userLocation.lng.toFixed(5)}` : "u:none";
+  const vs = [...vendors]
+    .filter((v) => v.location)
+    .map((v) => `${v.vendorId}:${v.location!.lat.toFixed(5)},${v.location!.lng.toFixed(5)}`)
+    .sort()
+    .join(";");
+  return `${u}|${vs}`;
+}
 
 function initialCenter(userLocation: Location | null, vendors: Vendor[]): [number, number] | null {
   if (userLocation) return [userLocation.lat, userLocation.lng];
@@ -50,8 +61,12 @@ export default function OsmMapInner({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
+  const markersByVendorRef = useRef<Map<string, L.Marker>>(new Map());
+  const structuralKeyRef = useRef<string>("");
   const onVendorSelectRef = useRef(onVendorSelect);
   onVendorSelectRef.current = onVendorSelect;
+
+  const vendorsStructuralKey = useMemo(() => structuralKey(userLocation, vendors), [userLocation, vendors]);
 
   useEffect(() => {
     return () => {
@@ -62,6 +77,8 @@ export default function OsmMapInner({
       }
       mapRef.current = null;
       layerRef.current = null;
+      markersByVendorRef.current.clear();
+      structuralKeyRef.current = "";
     };
   }, []);
 
@@ -112,60 +129,86 @@ export default function OsmMapInner({
       /* ignore */
     }
 
-    try {
-      lg.clearLayers();
-    } catch {
-      if (cancelled) return;
-    }
+    const structureChanged = vendorsStructuralKey !== structuralKeyRef.current;
+    structuralKeyRef.current = vendorsStructuralKey;
 
-    if (cancelled || !mapAlive(map)) return;
-
-    const latlngs: L.LatLngExpression[] = [];
-
-    if (userLocation) {
-      latlngs.push([userLocation.lat, userLocation.lng]);
-      L.circleMarker([userLocation.lat, userLocation.lng], {
-        radius: 8,
-        fillColor: "#0a84ff",
-        color: "#ffffff",
-        weight: 2,
-        opacity: 1,
-        fillOpacity: 0.95,
-      })
-        .bindTooltip("You", { permanent: false })
-        .addTo(lg);
-    }
-
-    vendors.forEach((v) => {
-      if (!v.location) return;
-      const { lat, lng } = v.location;
-      latlngs.push([lat, lng]);
-      const hl = highlightedVendorId === v.vendorId;
-      const mk = L.marker([lat, lng], {
-        icon: pinIcon(hl),
-        riseOnHover: true,
-      });
-      mk.bindPopup(`<strong>${escapeHtml(v.name)}</strong>`);
-      mk.on("click", () => {
-        onVendorSelectRef.current?.(v);
-      });
-      mk.addTo(lg);
-    });
-
-    if (latlngs.length === 0) return;
-    if (cancelled || !mapAlive(map)) return;
-
-    try {
-      if (latlngs.length === 1) {
-        map.setView(latlngs[0] as L.LatLngTuple, 15);
-      } else {
-        map.fitBounds(L.latLngBounds(latlngs as L.LatLngTuple[]), {
-          padding: [28, 28],
-          maxZoom: 16,
-        });
+    if (structureChanged) {
+      try {
+        lg.clearLayers();
+      } catch {
+        if (cancelled) return;
       }
-    } catch {
-      /* Leaflet occasionally throws if the map is resizing mid-update */
+      markersByVendorRef.current.clear();
+
+      if (cancelled || !mapAlive(map)) return;
+
+      const latlngs: L.LatLngExpression[] = [];
+
+      if (userLocation) {
+        latlngs.push([userLocation.lat, userLocation.lng]);
+        L.circleMarker([userLocation.lat, userLocation.lng], {
+          radius: 8,
+          fillColor: "#0a84ff",
+          color: "#ffffff",
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 0.95,
+        })
+          .bindTooltip("You", { permanent: false })
+          .addTo(lg);
+      }
+
+      vendors.forEach((v) => {
+        if (!v.location) return;
+        const { lat, lng } = v.location;
+        latlngs.push([lat, lng]);
+        const hl = highlightedVendorId === v.vendorId;
+        const mk = L.marker([lat, lng], {
+          icon: pinIcon(hl),
+          riseOnHover: true,
+        });
+        mk.bindPopup(`<strong>${escapeHtml(v.name)}</strong>`);
+        mk.on("click", () => {
+          onVendorSelectRef.current?.(v);
+        });
+        mk.addTo(lg);
+        markersByVendorRef.current.set(v.vendorId, mk);
+      });
+
+      if (latlngs.length > 0 && mapAlive(map) && !cancelled) {
+        try {
+          if (latlngs.length === 1) {
+            map.setView(latlngs[0] as L.LatLngTuple, 15);
+          } else {
+            map.fitBounds(L.latLngBounds(latlngs as L.LatLngTuple[]), {
+              padding: [28, 28],
+              maxZoom: 16,
+            });
+          }
+        } catch {
+          /* Leaflet occasionally throws if the map is resizing mid-update */
+        }
+      }
+    } else {
+      markersByVendorRef.current.forEach((m, id) => {
+        const hl = highlightedVendorId === id;
+        try {
+          m.setIcon(pinIcon(hl));
+        } catch {
+          /* ignore */
+        }
+      });
+
+      if (highlightedVendorId && mapAlive(map) && !cancelled) {
+        const v = vendors.find((x) => x.vendorId === highlightedVendorId);
+        if (v?.location) {
+          try {
+            map.panTo([v.location.lat, v.location.lng], { animate: true, duration: 0.32 } as L.ZoomPanOptions);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
     }
 
     raf1 = requestAnimationFrame(() => {
@@ -182,7 +225,7 @@ export default function OsmMapInner({
       cancelAnimationFrame(raf0);
       cancelAnimationFrame(raf1);
     };
-  }, [userLocation, vendors, highlightedVendorId]);
+  }, [userLocation, vendors, vendorsStructuralKey, highlightedVendorId]);
 
   return (
     <div

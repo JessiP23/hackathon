@@ -1,15 +1,21 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, startTransition } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getCurrentLocation } from "@/app/services/location";
 import { getDealsNearby, placeDealOrder, notifyOptIn, getUserByPhone } from "@/app/services/api";
-import { Deal, Location } from "@/app/shared/types";
+import { Deal, Location, Vendor } from "@/app/shared/types";
 import DealTile from "@/app/components/DealTile";
 import { MobileAppFrame } from "@/app/components/MobileLayout";
 import { isDemoBrowse } from "@/app/lib/demo";
 import { DataCard, PillLink, PillButton } from "@/app/components/Precision";
+
+const DealsStackMap = dynamic(() => import("@/app/components/OsmMapView"), {
+  ssr: false,
+  loading: () => <div className="size-full animate-pulse bg-[var(--is-card)]" />,
+});
 
 export default function DealsPage() {
   const router = useRouter();
@@ -182,6 +188,23 @@ export default function DealsPage() {
 
   const stackSlice = sortedDeals.slice(stackIndex, stackIndex + 3);
 
+  const topDeal = stackSlice[0];
+  const sharedMapOpen = Boolean(
+    topDeal && !topDeal.mediaUrl && topDeal.lat != null && topDeal.lng != null,
+  );
+
+  const stackMapVendors: Vendor[] = useMemo(
+    () =>
+      sortedDeals
+        .filter((d) => d.lat != null && d.lng != null)
+        .map((d) => ({
+          vendorId: d.dealId,
+          name: d.vendorName ?? d.pickupArea ?? "Pickup",
+          location: { lat: d.lat!, lng: d.lng! },
+        })),
+    [sortedDeals],
+  );
+
   function DealSkeleton({ i }: { i: number }) {
     return (
       <div
@@ -280,6 +303,19 @@ export default function DealsPage() {
 
         {!loading && sortedDeals.length > 0 && (
           <div className="relative h-[100dvh] flex-1">
+            {sharedMapOpen && stackMapVendors.length > 0 && topDeal ? (
+              <div
+                key="deals-stack-map-host"
+                className="absolute top-0 right-0 left-0 z-10 h-[min(48vh,420px)] overflow-hidden rounded-b-[24px] bg-[var(--is-card)] [&_.leaflet-container]:!bg-[var(--is-card)]"
+              >
+                <DealsStackMap
+                  userLocation={location}
+                  vendors={stackMapVendors}
+                  highlightedVendorId={topDeal.dealId}
+                  className="size-full !min-h-0 rounded-none border-0"
+                />
+              </div>
+            ) : null}
             {ordering && (
               <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40">
                 <span className="text-[14px] font-medium text-[var(--is-text-1)]">Opening checkout…</span>
@@ -287,11 +323,12 @@ export default function DealsPage() {
             )}
             {stackSlice.map((deal, i) => (
               <DealTile
-                key={`${deal.dealId}-${stackIndex + i}`}
+                key={deal.dealId}
                 deal={deal}
                 stackIndex={i}
                 isTop={i === 0}
                 userLocation={location}
+                sharedMapLayerActive={sharedMapOpen}
                 onReserve={handleReserve}
                 onSwipeNext={onSwipeNext}
               />

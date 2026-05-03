@@ -17,6 +17,8 @@ interface Props {
   onReserve: (deal: Deal) => void;
   onSwipeNext: () => void;
   isTop: boolean;
+  /** When true, deals page renders one shared map behind the stack; top map-card hero is transparent. */
+  sharedMapLayerActive?: boolean;
   /** Shown on map with pickup pin; optional when geolocation denied. */
   userLocation: Location | null;
 }
@@ -38,7 +40,15 @@ function vendorInitials(name: string | undefined) {
 
 const DETAILS_DRAG_ARM_PX = 12;
 
-function DealTileInner({ deal, stackIndex, onReserve, onSwipeNext, isTop, userLocation }: Props) {
+function DealTileInner({
+  deal,
+  stackIndex,
+  onReserve,
+  onSwipeNext,
+  isTop,
+  sharedMapLayerActive = false,
+  userLocation,
+}: Props) {
   const x = useMotionValue(0);
   const lastTap = useRef<number>(0);
   const dragControls = useDragControls();
@@ -141,6 +151,9 @@ function DealTileInner({ deal, stackIndex, onReserve, onSwipeNext, isTop, userLo
   }, [deal.dealId, deal.lat, deal.lng, deal.vendorName]);
 
   const showLiveMap = Boolean(!deal.mediaUrl && mapVendors.length > 0 && isTop);
+  const passthroughSharedMap = Boolean(
+    sharedMapLayerActive && showLiveMap,
+  );
 
   const releaseStartDetailDrag = useCallback(
     (nativeDown: globalThis.PointerEvent) => {
@@ -207,7 +220,7 @@ function DealTileInner({ deal, stackIndex, onReserve, onSwipeNext, isTop, userLo
 
   return (
     <div
-      className="absolute inset-0 flex min-h-0 flex-col overflow-hidden bg-[var(--is-bg)]"
+      className="absolute inset-0 flex min-h-0 flex-col overflow-hidden"
       style={{
         zIndex: z,
         scale,
@@ -215,8 +228,10 @@ function DealTileInner({ deal, stackIndex, onReserve, onSwipeNext, isTop, userLo
       }}
     >
       <div
-        className="relative h-[min(48vh,420px)] shrink-0 overflow-hidden rounded-b-[24px] bg-[var(--is-surface)]"
-        onClick={handleTapMedia}
+        className={`relative h-[min(48vh,420px)] shrink-0 overflow-hidden rounded-b-[24px] ${
+          passthroughSharedMap ? "pointer-events-none bg-transparent" : "bg-[var(--is-surface)]"
+        }`}
+        onClick={passthroughSharedMap ? undefined : handleTapMedia}
       >
         {deal.mediaUrl ? (
           deal.mediaUrl.match(/\.(mp4|webm|mov)$/i) ? (
@@ -238,21 +253,28 @@ function DealTileInner({ deal, stackIndex, onReserve, onSwipeNext, isTop, userLo
             />
           )
         ) : showLiveMap ? (
-          <div
-            className="relative size-full [&_.leaflet-container]:!bg-[var(--is-card)]"
-            style={{ pointerEvents: isTop ? "auto" : "none" }}
-          >
-            <OsmMapView
-              userLocation={userLocation}
-              vendors={mapVendors}
-              highlightedVendorId={deal.dealId}
-              className="size-full !min-h-0 rounded-none border-0"
-            />
+          passthroughSharedMap ? (
             <div
               className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[var(--is-surface)]/90 to-transparent"
               aria-hidden
             />
-          </div>
+          ) : (
+            <div
+              className="relative size-full [&_.leaflet-container]:!bg-[var(--is-card)]"
+              style={{ pointerEvents: isTop ? "auto" : "none" }}
+            >
+              <OsmMapView
+                userLocation={userLocation}
+                vendors={mapVendors}
+                highlightedVendorId={deal.dealId}
+                className="size-full !min-h-0 rounded-none border-0"
+              />
+              <div
+                className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[var(--is-surface)]/90 to-transparent"
+                aria-hidden
+              />
+            </div>
+          )
         ) : mapVendors.length > 0 && !isTop ? (
           <div
             className="flex size-full flex-col items-center justify-center gap-1 bg-[var(--is-card)] text-[var(--is-text-3)]"
@@ -281,7 +303,7 @@ function DealTileInner({ deal, stackIndex, onReserve, onSwipeNext, isTop, userLo
       </div>
 
       <motion.div
-        className="relative flex min-h-0 flex-1 touch-pan-y flex-col overflow-hidden"
+        className="relative flex min-h-0 flex-1 touch-pan-y flex-col overflow-hidden bg-[var(--is-bg)]"
         style={{
           x: isTop ? x : 0,
           rotate: isTop ? rot : 0,
@@ -380,6 +402,7 @@ function dealTilePropsEqual(prev: Props, next: Props) {
     prev.deal.distanceMiles === next.deal.distanceMiles &&
     prev.stackIndex === next.stackIndex &&
     prev.isTop === next.isTop &&
+    prev.sharedMapLayerActive === next.sharedMapLayerActive &&
     prev.userLocation?.lat === next.userLocation?.lat &&
     prev.userLocation?.lng === next.userLocation?.lng &&
     prev.onReserve === next.onReserve &&
