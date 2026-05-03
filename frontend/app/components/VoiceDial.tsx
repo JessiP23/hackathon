@@ -31,12 +31,17 @@ interface SpeechWindow extends Window {
 
 interface Props {
   onTranscript: (transcript: string) => void;
+  /** Inline with search bar; omit fixed bottom-right positioning */
+  className?: string;
+  disabled?: boolean;
+  variant?: "dark" | "light";
 }
 
-export default function VoiceDial({ onTranscript }: Props) {
+export default function VoiceDial({ onTranscript, className, disabled, variant = "dark" }: Props) {
   const [recording, setRecording] = useState(false);
 
   async function handleClick() {
+    if (disabled) return;
     // Fall back to prompt if Web Speech API not available
     const speechWindow = window as SpeechWindow;
     if (!speechWindow.webkitSpeechRecognition && !speechWindow.SpeechRecognition) {
@@ -84,12 +89,21 @@ export default function VoiceDial({ onTranscript }: Props) {
     setRecording(false);
   }
 
+  const base =
+    "shrink-0 w-14 h-14 rounded-full text-xl flex items-center justify-center shadow-lg active:scale-95 transition-colors disabled:opacity-40 disabled:pointer-events-none";
+
+  const idle =
+    variant === "light"
+      ? "border border-black/[0.1] bg-[var(--color-parchment)] text-[var(--color-ink)] hover:bg-white"
+      : "border border-white/10 bg-neutral-900 text-white hover:bg-neutral-800";
+
   return (
     <button
+      type="button"
+      aria-label={recording ? "Stop listening" : "Search by voice"}
+      disabled={disabled}
       onClick={handleClick}
-      className={`fixed bottom-6 right-6 w-16 h-16 rounded-full text-white text-2xl flex items-center justify-center shadow-lg active:scale-95 transition-colors ${
-        recording ? "bg-red-500 animate-pulse" : "bg-black"
-      }`}
+      className={`${base} ${recording ? "border border-red-400/40 bg-red-500 animate-pulse text-white" : idle} ${className ?? ""}`}
     >
       {recording ? "⏹" : "🎤"}
     </button>

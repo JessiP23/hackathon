@@ -2,8 +2,11 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import vendors, orders, deals, voice, user
+from app.routers.customers import router as customers_router
 from app.routers.webhook import router as webhook_router
 from app.routers.stripe_webhook import router as stripe_router
+from app.routers.telegram_webhook import router as telegram_router
+from app.routers.short_link import router as short_link_router
 
 app = FastAPI(title="InfraStreet API")
 
@@ -17,11 +20,14 @@ app.add_middleware(
 )
 
 app.include_router(user.router, prefix="/users", tags=["users"])
+app.include_router(customers_router, prefix="/customers", tags=["customers"])
 app.include_router(vendors.router, prefix="/vendors", tags=["vendors"])
 app.include_router(orders.router, prefix="/orders", tags=["orders"])
 app.include_router(deals.router, prefix="/deals", tags=["deals"])
 app.include_router(voice.router, tags=["voice"])
 app.include_router(webhook_router, tags=["webhooks"])
+app.include_router(telegram_router, tags=["telegram"])
+app.include_router(short_link_router, tags=["links"])
 app.include_router(stripe_router, tags=["stripe"])
 
 
@@ -44,7 +50,20 @@ async def shutdown_event():
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "service": "infrastreet-api"}
+    body = {"status": "healthy", "service": "infrastreet-api"}
+    url = os.getenv("REDIS_URL", "").strip()
+    if not url:
+        body["redis"] = "unset"
+        return body
+    try:
+        import redis
+
+        r = redis.from_url(url, decode_responses=True, socket_connect_timeout=3)
+        r.ping()
+        body["redis"] = "ok"
+    except Exception:
+        body["redis"] = "error"
+    return body
 
 
 @app.get("/")

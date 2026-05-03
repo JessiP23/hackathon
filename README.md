@@ -1,64 +1,60 @@
 # InfraStreet
 
-AI-native street vendor marketplace. Vendors onboard and manage flash deals over Twilio SMS/MMS/WhatsApp; customers discover and reserve nearby deals in the mobile web app.
+AI-native street vendor marketplace. **Vendors** use **Telegram**; **customers** use **infrastreet.app**. Agent **v3.3 FINAL**: PaddleOCR-first menu OCR (Groq vision fallback), `notifications` table, hourly vendor-local weekly stats, `POST /customers/notify_opt_in`, DealTile swipe UI + empty-state notify flow.
 
-## What Is Wired
-- FastAPI backend with Postgres/PostGIS, Redis state, Twilio webhooks, Groq deal parsing/OCR hooks, Stripe Checkout, and APScheduler jobs.
-- LeanMCP server exposing vendor search, nearby deals, onboarding, and order tools.
-- Next.js frontend for customer deal discovery, voice search, vendor onboarding, orders, and vendor dashboard.
+## Stack
+- **LLM:** Groq `llama-3.3-70b-versatile` (deal parsing).
+- **OCR:** PaddleOCR (`USE_PADDLE_OCR=1`, default) → Groq llama-4-scout if Paddle missing or low yield.
+- **Backend:** FastAPI, Postgres/PostGIS, Redis (short links + OTP + scheduler dedupe).
+- **Scheduler:** Auto-deal every **30m** (Cancel → `cancel_{dealId}`); weekly stats **hourly UTC** tick, sends once per vendor per ISO week when local Mon **09:00** (`vendors.timezone`).
+- **Short links:** `GET /d/{code}` on API; set **`SHORT_LINK_BASE`** to public API URL.
 
-## Environment Setup
-Create local env files:
+## DB migration (v3.3)
+Run `backend/migrate.sql` in **your** Postgres (e.g. Supabase → SQL Editor), including:
+- `notifications` table (rename from `notification_logs` when upgrading).
+- Customer `telegram_id` + `notification_channel` CHECK.
+- `ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT` (fixes `/users` 500s).
 
-```bash
-cp backend/.env.example backend/.env
-cp frontend/.env.local.example frontend/.env.local
-cp mcp-server/.env.example mcp-server/.env
-```
-
-For a local smoke test, the defaults are enough except live Twilio/Groq/Stripe/B2 calls will be skipped or unavailable until you add real credentials.
-
-## Run Everything Locally
-Start Postgres/PostGIS, Redis, MCP, and backend from the repo root:
+### Supabase vs Docker Postgres
+`docker-compose.yml` **does not override `DATABASE_URL`**. Put your **Supabase** connection string in **`backend/.env`** (`DATABASE_URL=postgresql://...@...pooler.supabase.com:6543/postgres?sslmode=require`). Default Compose brings up **Redis + backend + MCP**, not local Postgres:
 
 ```bash
 docker compose up --build
 ```
 
-Run the frontend in a second terminal:
+For an optional **local** PostGIS container + migrate bootstrap:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+docker compose --profile local-db up --build
+# backend/.env inside Docker must use host postgres:
+# DATABASE_URL=postgresql://infrastreet:infrastreet@postgres:5432/infrastreet
 ```
 
-Open `http://localhost:3000`. Backend health is `http://localhost:8000/health`; MCP runs at `http://localhost:3001/mcp`.
+## Env (copy from `.env.example`)
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `GROQ_API_KEY`, Twilio (SMS + OTP), `REDIS_URL`, B2, `SHORT_LINK_BASE`, `FRONTEND_URL`, `CORS_ORIGINS`.
 
-## Twilio (easiest path — one Messaging Service)
-
-**Env:** Set `TWILIO_MESSAGING_SERVICE_SID=MG...` (one service). Optionally set `TWILIO_MESSAGING_SERVICE_SID_VENDOR` / `_CUSTOMER` later for two pools; if unset, both use the single SID.
-
-**Twilio Console:** Messaging → Services → create service → add **one** SMS-capable phone number → Integration → “When a message comes in” → `POST` → `https://<your-api-host>/sms/vendor`
-
-**Fly:** `PUBLIC_BASE_URL=https://infrastreet-api.fly.dev` (must match the URL Twilio calls; no trailing slash).
-
-## Twilio Local Test
-1. Run `ngrok http 8000`.
-2. Set `PUBLIC_BASE_URL` in `backend/.env` to the ngrok HTTPS URL.
-3. In Twilio Messaging Services, set vendor inbound webhook to `https://<ngrok-id>.ngrok-free.app/sms/vendor`.
-4. Text your Twilio number to start vendor onboarding.
-
-## Useful Checks
+### PaddleOCR (recommended)
 ```bash
-cd backend && python -m compileall main.py app
-cd mcp-server && npm run build
-cd frontend && npm run lint && npm run build
+pip install paddlepaddle paddleocr   # platform-specific wheel from Paddle docs
+export USE_PADDLE_OCR=1
+export PADDLE_OCR_LANG=es
 ```
 
-## Core Endpoints
-- `POST /sms/vendor` and `POST /sms/customer` - Twilio inbound webhooks.
-- `POST /vendors`, `GET /vendors/{vendorId}`, `POST /vendors/{vendorId}/menu`.
-- `GET /deals`, `POST /deals/{dealId}/order`.
-- `POST /orders`, `GET /orders/{orderId}`, `PATCH /orders/{orderId}/status`.
-- `POST /voice` - voice transcript routed through MCP tools with backend fallback.
+## Run locally
+```bash
+# Ensure backend/.env has DATABASE_URL (Supabase or local Postgres).
+docker compose up --build
+cd frontend && npm install && npm run dev
+```
+
+## API highlights
+| Method | Path | Notes |
+|--------|------|--------|
+| POST | `/customers/notify_opt_in` | `{ lat, lng, radius, phone }` — upsert customer, enable alerts, SMS OTP when Twilio set |
+| POST | `/telegram/webhook` | Vendors |
+| GET | `/d/{code}` | Short deal link |
+
+## Frontend §5
+`/deals` uses **DealTile** (full viewport, vertical swipe, spring exit, accent `#E63946`, frosted sheet). Empty state: animated gradient placeholder; add `public/steam_rising.mp4` optional. **Notify me** calls `notify_opt_in`.
+
+Full interaction tokens / haptics spec lives in the Agent v3.3 prompt for designers.

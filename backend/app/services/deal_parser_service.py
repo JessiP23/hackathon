@@ -146,6 +146,8 @@ class DealParserService:
             return "quantity"
         if deal.get("deal_price") is None and deal.get("discount_pct") is None:
             return "price"
+        if not (deal.get("media_url") or "").strip():
+            return "deal_photo"
         return None
 
     def clarification_question(self, missing_field: str, lang: str = "es") -> str:
@@ -165,6 +167,10 @@ class DealParserService:
             "price": {
                 "es": "¿Cuál es el precio del deal?",
                 "en": "What is the deal price?"
+            },
+            "deal_photo": {
+                "es": "Manda una sola foto del plato para el deal (asi lo ven los clientes en la app).",
+                "en": "Send one photo of the dish for this deal — customers see it in the app.",
             },
         }
         bucket = questions.get(missing_field, {})

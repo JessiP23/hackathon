@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getCurrentLocation } from "@/app/services/location";
-import { getDealsNearby, placeDealOrder } from "@/app/services/api";
+import { getDealsNearby, placeDealOrder, notifyOptIn } from "@/app/services/api";
 import { Deal, Location } from "@/app/shared/types";
-import DealCard from "@/app/components/DealCard";
+import DealTile from "@/app/components/DealTile";
+import { MobileAppFrame } from "@/app/components/MobileLayout";
+import { isDemoBrowse } from "@/app/lib/demo";
+import { DataCard, PillLink, PillButton } from "@/app/components/Precision";
 
 export default function DealsPage() {
   const router = useRouter();
@@ -14,6 +17,21 @@ export default function DealsPage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [ordering, setOrdering] = useState<string | null>(null);
+  const [focusDealId, setFocusDealId] = useState<string | null>(null);
+  const [stackIndex, setStackIndex] = useState(0);
+  const [notifyBusy, setNotifyBusy] = useState(false);
+  const [notifyMsg, setNotifyMsg] = useState<string | null>(null);
+  const [showDemoBanner, setShowDemoBanner] = useState(false);
+
+  useEffect(() => {
+    setShowDemoBanner(isDemoBrowse() && !localStorage.getItem("infrastreet_phone"));
+  }, []);
+
+  useEffect(() => {
+    const q =
+      typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("deal") : null;
+    setFocusDealId(q);
+  }, []);
 
   useEffect(() => {
     getCurrentLocation()
@@ -29,27 +47,42 @@ export default function DealsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const handleReserve = useCallback(async (deal: Deal) => {
-    const phone = localStorage.getItem("infrastreet_phone");
-    if (!phone) {
-      router.push("/customer-onboarding");
-      return;
-    }
-    setOrdering(deal.dealId);
-    try {
-      const order = await placeDealOrder(deal.dealId, { customerPhone: phone, quantity: 1 });
-      if (order.checkoutUrl) {
-        window.location.href = order.checkoutUrl;
-      } else {
-        router.push(`/orders/${order.orderId}/confirmed`);
+  const handleReserve = useCallback(
+    async (deal: Deal) => {
+      const phone = localStorage.getItem("infrastreet_phone");
+      if (!phone) {
+        if (isDemoBrowse()) {
+          alert("Demo: complete Get started to add your number, then you can reserve and pay.");
+          return;
+        }
+        router.push("/onboard");
+        return;
       }
-    } catch (e) {
-      console.error(e);
-      alert("Could not place order. Please try again.");
-    } finally {
-      setOrdering(null);
-    }
-  }, [router]);
+      setOrdering(deal.dealId);
+      try {
+        const order = await placeDealOrder(deal.dealId, { customerPhone: phone, quantity: 1 });
+        if (order.checkoutUrl) {
+          try {
+            sessionStorage.setItem(
+              "infrastreet_checkout",
+              JSON.stringify({ orderId: order.orderId, url: order.checkoutUrl }),
+            );
+          } catch {
+            /* ignore */
+          }
+          router.push(`/checkout?orderId=${encodeURIComponent(order.orderId)}`);
+        } else {
+          router.push(`/orders/${order.orderId}/confirmed`);
+        }
+      } catch (e) {
+        console.error(e);
+        alert("Could not place order. Please try again.");
+      } finally {
+        setOrdering(null);
+      }
+    },
+    [router],
+  );
 
   function getTimeLeft(expiresAt: string) {
     const diff = new Date(expiresAt).getTime() - Date.now();
@@ -62,45 +95,173 @@ export default function DealsPage() {
 
   const activeDeals = deals.filter((d) => d.expiresAt && getTimeLeft(d.expiresAt));
 
-  return (
-    <main className="min-h-screen bg-neutral-950 text-white">
-      <header className="sticky top-0 z-20 bg-gradient-to-r from-red-600 to-orange-500">
-        <div className="max-w-lg mx-auto px-5 py-6">
-          <Link href="/search" className="text-white/70 text-sm font-medium">← Back</Link>
-          <h1 className="text-2xl font-black mt-2">🔥 Hot Deals</h1>
-          <p className="text-white/70 text-sm mt-1">
-            {location ? `Near you · ${activeDeals.length} active` : "Limited time only"}
-          </p>
-        </div>
-      </header>
+  const sortedDeals = useMemo(() => {
+    if (!focusDealId) return activeDeals;
+    const ix = activeDeals.findIndex((d) => d.dealId === focusDealId);
+    if (ix <= 0) return activeDeals;
+    const copy = [...activeDeals];
+    const [h] = copy.splice(ix, 1);
+    return [h, ...copy];
+  }, [activeDeals, focusDealId]);
 
-      <div className="max-w-lg mx-auto px-4 py-6">
-        {loading && (
-          <div className="flex justify-center py-20">
-            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
-          </div>
-        )}
+  useEffect(() => {
+    setStackIndex(0);
+  }, [sortedDeals.length]);
 
-        {!loading && activeDeals.length === 0 && (
-          <div className="text-center py-20">
-            <h2 className="text-2xl font-bold mb-2">No deals right now</h2>
-            <p className="text-neutral-500 mb-8">Check back soon</p>
-            <Link href="/search" className="inline-block bg-white text-black px-8 py-3 rounded-xl font-bold">
-              Browse Vendors
-            </Link>
-          </div>
-        )}
+  const onSwipeNext = useCallback(() => {
+    setStackIndex((i) => Math.min(i + 1, Math.max(0, sortedDeals.length - 1)));
+    try {
+      if (sortedDeals.length) navigator.vibrate?.([10, 30, 10]);
+    } catch {
+      /* ignore */
+    }
+  }, [sortedDeals.length]);
 
-        <div className="space-y-4">
-          {activeDeals.map((deal) => (
-            <div key={deal.dealId} className={ordering === deal.dealId ? "opacity-60 pointer-events-none" : ""}>
-              <DealCard deal={deal} onReserve={handleReserve} />
-            </div>
-          ))}
+  const onNotifyMe = async () => {
+    setNotifyMsg(null);
+    let loc = location;
+    try {
+      if (!loc) loc = await getCurrentLocation();
+    } catch {
+      setNotifyMsg("Turn on location to get neighborhood alerts.");
+      return;
+    }
+    let phone = localStorage.getItem("infrastreet_phone") || "";
+    if (!phone && typeof window !== "undefined") {
+      phone = window.prompt("Your mobile number (include country code, e.g. +15551234567)") || "";
+    }
+    if (!phone.trim()) {
+      setNotifyMsg("Phone required.");
+      return;
+    }
+    setNotifyBusy(true);
+    try {
+      const res = await notifyOptIn({
+        lat: loc.lat,
+        lng: loc.lng,
+        radius: 10,
+        phone: phone.trim(),
+      });
+      if (res.success) {
+        localStorage.setItem("infrastreet_phone", phone.trim());
+        setNotifyMsg(res.otpSent ? "Check your phone for a confirmation code." : "You're on the list.");
+      } else {
+        setNotifyMsg("Could not save. Try again.");
+      }
+    } catch {
+      setNotifyMsg("Network error. Try again.");
+    } finally {
+      setNotifyBusy(false);
+    }
+  };
+
+  const stackSlice = sortedDeals.slice(stackIndex, stackIndex + 3);
+
+  function DealSkeleton({ i }: { i: number }) {
+    return (
+      <div
+        className="absolute inset-0 flex flex-col justify-end bg-[var(--is-bg)]"
+        style={{ zIndex: 20 - i, transform: `scale(${1 - i * 0.03})` }}
+      >
+        <div className="skeleton mb-auto h-[55vh] w-full rounded-b-[24px]" />
+        <div className="px-5 pb-20">
+          <div className="skeleton mb-3 h-4 w-24" />
+          <div className="skeleton mb-2 h-8 w-full" />
+          <div className="skeleton h-4 w-2/3" />
         </div>
       </div>
-    </main>
+    );
+  }
+
+  return (
+    <MobileAppFrame>
+      <main className="page-enter relative flex min-h-[100dvh] flex-col overflow-hidden bg-[var(--is-bg)] text-[var(--is-text-1)]">
+        <header className="pointer-events-none absolute top-0 right-0 left-0 z-40 flex flex-col [padding-top:max(12px,env(safe-area-inset-top))]">
+          {showDemoBanner && (
+            <div className="pointer-events-auto mb-1 w-full px-4 py-2 text-center">
+              <Link
+                href="/onboard"
+                className="inline-block rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-3 py-2 text-[12px] font-medium text-[var(--is-text-1)]"
+              >
+                Demo browse — Get started to reserve
+              </Link>
+            </div>
+          )}
+          <div className="flex w-full items-center justify-between px-5 py-2">
+            <Link
+              href="/search"
+              className="pointer-events-auto flex min-h-[44px] items-center text-[13px] font-medium text-[var(--is-blue)]"
+            >
+              ‹ Search
+            </Link>
+            <span className="pointer-events-none text-center text-[15px] font-semibold tracking-[-0.01em] text-[var(--is-text-1)]">
+              Deals
+            </span>
+            <Link
+              href="/orders"
+              className="pointer-events-auto flex min-h-[44px] items-center text-[13px] font-medium text-[var(--is-blue)]"
+            >
+              Orders
+            </Link>
+          </div>
+        </header>
+
+        {loading && (
+          <div className="relative flex-1">
+            <DealSkeleton i={0} />
+            <DealSkeleton i={1} />
+            <DealSkeleton i={2} />
+          </div>
+        )}
+
+        {!loading && sortedDeals.length === 0 && (
+          <div className="relative flex flex-1 flex-col items-center justify-center px-6 py-24 text-center">
+            <DataCard className="max-w-sm">
+              <p className="text-[11px] font-semibold tracking-[0.08em] text-[var(--is-text-4)] uppercase">
+                All caught up
+              </p>
+              <h1 className="mt-2 text-[17px] font-semibold tracking-[-0.02em] text-[var(--is-text-1)]">
+                No more deals right now
+              </h1>
+              <p className="mt-2 text-[15px] text-[var(--is-text-2)]">New flash deals drop throughout the day.</p>
+              <div className="mt-6">
+                <PillLink href="/search" variant="ghost">
+                  Explore the map
+                </PillLink>
+              </div>
+              <div className="mt-6">
+                <PillButton type="button" variant="ghost" disabled={notifyBusy} onClick={() => void onNotifyMe()}>
+                  {notifyBusy ? "Saving…" : "Notify me"}
+                </PillButton>
+                {notifyMsg && <p className="mt-3 text-[13px] text-[var(--is-text-2)]">{notifyMsg}</p>}
+              </div>
+            </DataCard>
+          </div>
+        )}
+
+        {!loading && sortedDeals.length > 0 && (
+          <div className="relative h-[100dvh] flex-1">
+            {ordering && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40">
+                <span className="text-[14px] font-medium text-[var(--is-text-1)]">Opening checkout…</span>
+              </div>
+            )}
+            {stackSlice.map((deal, i) => (
+              <DealTile
+                key={`${deal.dealId}-${stackIndex + i}`}
+                deal={deal}
+                stackIndex={i}
+                isTop={i === 0}
+                onReserve={handleReserve}
+                onSwipeNext={onSwipeNext}
+              />
+            ))}
+            <p className="pointer-events-none absolute right-0 bottom-8 left-0 z-40 text-center text-[11px] text-[var(--is-text-4)] [padding-bottom:env(safe-area-inset-bottom)]">
+              Swipe up next · Swipe right save
+            </p>
+          </div>
+        )}
+      </main>
+    </MobileAppFrame>
   );
 }
-
-

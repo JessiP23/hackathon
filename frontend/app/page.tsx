@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getUserByPhone } from "./services/api";
 import { User } from "./shared/types";
+import { MobileAppFrame } from "./components/MobileLayout";
+import { setDemoBrowse } from "./lib/demo";
+import { PillLink, MetricCard } from "./components/Precision";
 
 export default function LandingPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -25,101 +28,99 @@ export default function LandingPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-neutral-950 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
-      </main>
+      <MobileAppFrame>
+        <main className="page-enter flex min-h-[100dvh] flex-col px-6 pb-12 pt-16">
+          <div className="skeleton mb-3 ml-0 h-4 w-48" />
+          <div className="skeleton mb-8 h-10 w-full max-w-[320px]" />
+          <div className="skeleton h-14 w-full rounded-[12px]" />
+        </main>
+      </MobileAppFrame>
     );
   }
 
   if (user) {
     return (
-      <main className="min-h-screen bg-neutral-950 text-white p-6">
-        <div className="max-w-md mx-auto pt-16 space-y-10">
+      <MobileAppFrame>
+        <header className="flex min-h-[48px] items-center justify-center border-b-[0.5px] border-[var(--is-border-1)] px-5 py-3">
+          <span className="text-[15px] font-semibold tracking-[-0.02em] text-[var(--is-text-1)]">
+            InfraStreet
+            <sup className="ml-0.5 align-super text-[9px] font-semibold text-[var(--is-purple)]">BETA</sup>
+          </span>
+        </header>
+        <main className="page-enter space-y-10 px-6 pb-16 pt-12">
           <div>
-            <p className="text-neutral-500 text-sm font-medium">Welcome back</p>
-            <h1 className="text-4xl font-black mt-1">{user.name || user.phone}</h1>
+            <p className="text-[15px] font-normal tracking-[-0.01em] text-[var(--is-text-2)]">Welcome back</p>
+            <h1 className="mt-2 text-[28px] font-bold leading-[1.15] tracking-[-0.04em] text-[var(--is-text-1)]">
+              {user.name || user.phone}
+            </h1>
           </div>
 
-          <div className="space-y-3">
-            {user.role === "vendor" ? (
-              <>
-                <Link href="/vendor-dashboard" className="block w-full bg-white text-black py-4 rounded-2xl text-center font-bold text-lg">
-                  Dashboard
-                </Link>
-                <Link href="/search" className="block w-full bg-white/10 border border-white/10 text-white py-4 rounded-2xl text-center font-semibold">
-                  Browse Food
-                </Link>
-              </>
-            ) : (
-              <>
-                <Link href="/search" className="block w-full bg-white text-black py-4 rounded-2xl text-center font-bold text-lg">
-                  Find Food
-                </Link>
-                <Link href="/deals" className="block w-full bg-gradient-to-r from-red-500 to-orange-500 text-white py-4 rounded-2xl text-center font-bold">
-                  Hot Deals
-                </Link>
-                <Link href="/orders" className="block w-full bg-white/10 border border-white/10 text-white py-4 rounded-2xl text-center font-semibold">
-                  My Orders
-                </Link>
-              </>
-            )}
+          <div className="flex flex-col gap-3">
+            <PillLink href="/deals">Flash deals</PillLink>
+            <PillLink href="/search" variant="ghost">
+              Find food
+            </PillLink>
+            <Link
+              href="/orders"
+              className="flex min-h-[48px] w-full items-center justify-center rounded-[12px] py-3 text-[15px] font-semibold text-[var(--is-text-3)]"
+            >
+              My orders
+            </Link>
           </div>
 
           <button
+            type="button"
             onClick={() => {
               localStorage.clear();
               setUser(null);
             }}
-            className="w-full text-neutral-500 text-sm py-4 hover:text-white transition-colors"
+            className="w-full py-4 text-[15px] text-[var(--is-text-3)]"
           >
             Sign out
           </button>
-        </div>
-      </main>
+        </main>
+      </MobileAppFrame>
     );
   }
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-white">
-      <div className="max-w-md mx-auto px-6 pt-24 pb-12 min-h-screen flex flex-col">
-        <div className="flex-1 space-y-16">
-          <div className="text-center">
-            <h1 className="text-6xl font-black tracking-tight">
-              Infra<span className="text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-500">Street</span>
-            </h1>
-            <p className="text-xl text-neutral-400 mt-4">Street food, one tap away</p>
+    <MobileAppFrame>
+      <main className="page-enter flex min-h-[100dvh] flex-col px-6 pb-12 pt-16">
+        <div className="flex flex-1 flex-col">
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--is-text-4)]">
+            Street food, one tap away
+          </p>
+          <h1 className="max-w-[340px] text-[32px] font-bold leading-[1.15] tracking-[-0.04em] text-[var(--is-text-1)]">
+            Your neighborhood&apos;s best stalls. Right now.
+          </h1>
+          <p className="mt-4 max-w-[320px] text-[15px] font-normal leading-snug tracking-[-0.01em] text-[var(--is-text-2)]">
+            Flash deals expire. Real vendors. Real food.
+          </p>
+
+          <div className="mt-8 flex flex-col gap-3">
+            <PillLink href="/onboard">Get started</PillLink>
+            <Link
+              href="/deals"
+              onClick={() => setDemoBrowse()}
+              className="flex min-h-[48px] w-full items-center justify-center rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-card)] py-[15px] text-[15px] font-semibold tracking-[-0.01em] text-[var(--is-text-2)] active:scale-[0.98] active:opacity-[0.82]"
+            >
+              See deals near me
+            </Link>
           </div>
 
-          <div className="space-y-8">
-            <div className="text-center">
-              <p className="text-2xl font-bold">Speak to search</p>
-              <p className="text-neutral-500 mt-1">Just say what you want</p>
-            </div>
-            <div className="text-center">
-              <p className="text-2xl font-bold">Order instantly</p>
-              <p className="text-neutral-500 mt-1">Get a pickup code in seconds</p>
-            </div>
-            <div className="text-center">
-              <p className="text-2xl font-bold">Support local</p>
-              <p className="text-neutral-500 mt-1">Discover hidden gems nearby</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-3 pt-8">
-          <Link href="/customer-onboarding" className="block w-full bg-white text-black py-4 rounded-2xl text-center font-bold text-lg">
-            Find Food
-          </Link>
-          <Link href="/vendor-onboarding" className="block w-full border-2 border-white/20 text-white py-4 rounded-2xl text-center font-semibold hover:bg-white/5 transition-colors">
-            I&apos;m a Vendor
-          </Link>
-          <p className="text-center text-xs text-neutral-600 pt-2">
-            <Link href="/sms-consent" className="underline hover:text-neutral-400">
-              SMS terms & consent
+          <p className="mt-6 text-center text-[11px] text-[var(--is-text-4)]">
+            <Link href="/sms-consent" className="text-[var(--is-blue)] underline underline-offset-2">
+              SMS terms
             </Link>
           </p>
         </div>
-      </div>
-    </main>
+
+        <div className="mt-8 grid grid-cols-3 gap-3">
+          <MetricCard label="Vendors active" value="847" />
+          <MetricCard label="Deals today" value="2.4k" valueClassName="text-[var(--is-green)]" />
+          <MetricCard label="Avg price" value="$6–18" valueClassName="text-[var(--is-purple)]" />
+        </div>
+      </main>
+    </MobileAppFrame>
   );
 }

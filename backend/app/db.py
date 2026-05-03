@@ -1,55 +1,91 @@
 import os
+from functools import lru_cache
+from urllib.parse import unquote, urlparse
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 
-def _sqlalchemy_database_url(raw: str) -> str:
-    """Plain postgresql:// selects psycopg2 (not installed). We use psycopg v3 only."""
-    if not raw:
-        return raw
-    url = raw.strip().strip('"').strip("'")
-    if not url:
-        return url
-    proto = url.split("://", 1)[0].lower()
-    if proto in ("http", "https"):
-        raise RuntimeError(
-            "DATABASE_URL must be a Postgres URI (postgresql:// or postgres://), not an https:// URL. "
-            "Use the connection string from Fly Postgres (`fly postgres connect` / dashboard), Neon, "
-            "Supabase (Database settings → URI), or Docker Compose — not a REST or dashboard link."
+def _log_pooler_user_once(url: str) -> None:
+    if "pooler.supabase.com" not in url:
+        return
+    normalized = url.replace("postgresql+psycopg://", "postgresql://", 1)
+    try:
+        parsed = urlparse(normalized)
+        user = unquote(parsed.username or "")
+    except Exception:
+        return
+    print(f"[db] DATABASE_URL username (for pooler): {user!r}", flush=True)
+    if user == "postgres":
+        print(
+            "[db] FATAL auth with user 'postgres' is common: use the pooler URI from Supabase "
+            "— username is usually postgres.<project_ref>, and password must match Database password.",
+            flush=True,
         )
-    scheme = url.split("://", 1)[0]
-    if "+" in scheme:
-        return url
-    if url.startswith("postgresql://"):
-        return "postgresql+psycopg://" + url[len("postgresql://") :]
-    if url.startswith("postgres://"):
-        return "postgresql+psycopg://" + url[len("postgres://") :]
-    raise RuntimeError(
-        f"DATABASE_URL must start with postgresql:// or postgres:// (got scheme {proto!r})."
-    )
 
 
-DATABASE_URL = _sqlalchemy_database_url(
-    os.getenv(
-        "DATABASE_URL",
-        "postgresql://infrastreet:infrastreet@localhost:5432/infrastreet",
-    )
-)
+def get_database_url() -> str:
+    raw = os.getenv("DATABASE_URL", "").strip().strip('"').strip("'")
+    if not raw:
+        raise RuntimeError("DATABASE_URL not set")
 
-# Handle Supabase connection pooling (use transaction mode)
-if "supabase.co" in DATABASE_URL:
-    # Supabase uses port 6543 for transaction pooling
-    # But direct connection on 5432 works fine for our use case
-    engine = create_engine(
-        DATABASE_URL,
+    if raw.startswith("postgres://"):
+        raw = raw.replace("postgres://", "postgresql://", 1)
+
+    if not raw.startswith("postgresql://"):
+        raise RuntimeError(f"DATABASE_URL must start with postgresql://, got: {raw[:20]}...")
+
+    if "pooler.supabase.com" in raw and "sslmode=" not in raw.lower():
+        raw += "&sslmode=require" if "?" in raw else "?sslmode=require"
+
+    if "+" not in raw.split("://", 1)[0]:
+        raw = raw.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    return raw
+
+
+@lru_cache(maxsize=1)
+def get_engine():
+    """Engine is created on first use — importing this module does not connect to Postgres."""
+    url = get_database_url()
+    _log_pooler_user_once(url)
+    connect_args: dict = {}
+    if "pooler.supabase.com" in url:
+        connect_args["options"] = "-c search_path=public"
+        connect_args["prepare_threshold"] = 0
+        connect_args["sslmode"] = "require"
+    return create_engine(
+        url,
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=10,
-        connect_args={
-            "options": "-c search_path=public"
-        }
+        connect_args=connect_args,
     )
-else:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
-SessionLocal = sessionmaker(bind=engine)
+
+_session_maker = None
+
+
+def _get_session_maker():
+    global _session_maker
+    if _session_maker is None:
+        _session_maker = sessionmaker(
+            bind=get_engine(), autocommit=False, autoflush=False
+        )
+    return _session_maker
+
+
+class _SessionLocal:
+    __slots__ = ()
+
+    def __call__(self):
+        return _get_session_maker()()
+
+
+SessionLocal = _SessionLocal()
+
+
+def reset_db_engine():
+    global _session_maker
+    get_engine.cache_clear()
+    _session_maker = None

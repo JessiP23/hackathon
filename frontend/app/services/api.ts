@@ -132,6 +132,21 @@ export async function placeDealOrder(
   return res.data;
 }
 
+export async function notifyOptIn(data: {
+  lat: number;
+  lng: number;
+  radius?: number;
+  phone: string;
+}): Promise<{ success: boolean; otpSent?: boolean; error?: string }> {
+  const res = await api.post("/customers/notify_opt_in", {
+    lat: data.lat,
+    lng: data.lng,
+    radius: data.radius ?? 10,
+    phone: data.phone,
+  });
+  return res.data;
+}
+
 export async function getVendorStats(vendorId: string, days = 7) {
   try {
     const res = await api.get(`/vendors/${vendorId}/stats`, { params: { days } });

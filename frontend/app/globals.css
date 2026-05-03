@@ -1,44 +1,215 @@
 @import "tailwindcss";
 
+/* InfraStreet · Stripe Precision (YC S26) */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --is-bg: #0a0e1a;
+  --is-surface: #0f1428;
+  --is-card: #111928;
+  --is-card-raised: #060f20;
+  --is-border-1: #1e2a4a;
+  --is-border-2: #111928;
+  --is-border-3: #0d1525;
+  --is-text-1: #e8eaf0;
+  --is-text-2: #9da8c8;
+  --is-text-3: #4a5578;
+  --is-text-4: #3a4560;
+  --is-green: #30d158;
+  --is-green-tint: rgba(48, 209, 88, 0.12);
+  --is-green-border: rgba(48, 209, 88, 0.25);
+  --is-purple: #635bff;
+  --is-purple-tint: rgba(99, 91, 255, 0.12);
+  --is-purple-border: rgba(99, 91, 255, 0.25);
+  --is-red: #ff3b30;
+  --is-red-tint: rgba(255, 59, 48, 0.12);
+  --is-amber: #ffd60a;
+  --is-blue: #0a84ff;
+  --is-font: var(--font-inter), "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --is-mono: "Courier New", "SF Mono", ui-monospace, monospace;
+
+  /* Legacy aliases → Precision tokens (incremental migration) */
+  --infra-black: var(--is-bg);
+  --infra-tile-1: var(--is-surface);
+  --infra-tile-2: var(--is-card);
+  --infra-tile-3: var(--is-border-3);
+  --infra-ink: var(--is-text-1);
+  --infra-ink-2: var(--is-text-2);
+  --infra-ink-3: var(--is-text-3);
+  --infra-ink-4: var(--is-border-1);
+  --infra-accent: var(--is-red);
+  --infra-accent-2: var(--is-red-tint);
+  --infra-blue: var(--is-blue);
+  --infra-green: var(--is-green);
+  --infra-amber: var(--is-amber);
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+  --r-pill: 100px;
+
+  --background: var(--is-bg);
+  --foreground: var(--is-text-1);
+  --color-canvas: var(--is-bg);
+  --color-parchment: var(--is-surface);
+  --color-ink: var(--is-text-1);
+  --color-muted: var(--is-text-2);
+  --color-accent: var(--is-purple);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--is-bg);
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--is-bg);
+  color: var(--is-text-1);
+  font-family: var(--is-font);
+  font-size: 15px;
+  line-height: 1.47;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  overflow-x: hidden;
 }
 
-/* Animations */
+:focus-visible {
+  outline: 2px solid var(--is-purple);
+  outline-offset: 2px;
+}
+
+/* Leaflet · dark map chrome */
+.leaflet-container {
+  font-family: inherit;
+  background: var(--is-surface) !important;
+}
+
+.leaflet-control-zoom a {
+  background: var(--is-card) !important;
+  color: var(--is-text-1) !important;
+  border-color: var(--is-border-1) !important;
+}
+
+.leaflet-control-attribution {
+  background: rgba(10, 14, 26, 0.85) !important;
+  color: var(--is-text-3) !important;
+  font-size: 10px !important;
+  border-top-left-radius: 8px;
+}
+
+.leaflet-control-attribution a {
+  color: var(--is-blue) !important;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 12px;
+  background: var(--is-surface);
+  color: var(--is-text-1);
+}
+
+.leaflet-popup-tip {
+  background: var(--is-surface);
+}
+
+.leaflet-popup-content {
+  margin: 10px 12px;
+  font-size: 14px;
+}
+
+/* Custom map pin (Leaflet divIcon) */
+.is-map-pin {
+  background: transparent !important;
+  border: none !important;
+}
+.is-map-pin .is-map-pin-inner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--is-red);
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.is-map-pin.is-map-pin--hl .is-map-pin-inner {
+  width: 20px;
+  height: 20px;
+  box-shadow: 0 0 0 4px rgba(255, 59, 48, 0.35);
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--is-card) 25%, var(--is-surface) 50%, var(--is-card) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.6s infinite linear;
+  border-radius: 6px;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: page-in 0.22s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes item-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.item-stagger > * {
+  opacity: 0;
+  animation: item-in 0.18s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.item-stagger > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.item-stagger > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+.item-stagger > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+.item-stagger > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+.item-stagger > *:nth-child(5) {
+  animation-delay: 160ms;
+}
+
+/* Legacy animation helpers */
 @keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes slide-in-from-bottom-2 {
-  from { transform: translateY(8px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-
-@keyframes slide-in-from-bottom-4 {
-  from { transform: translateY(16px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .animate-in {
@@ -49,18 +220,40 @@ body {
   animation-name: fade-in;
 }
 
-.slide-in-from-bottom-2 {
-  animation-name: slide-in-from-bottom-2;
-}
-
-.slide-in-from-bottom-4 {
-  animation-name: slide-in-from-bottom-4;
-}
-
 .duration-300 {
   animation-duration: 300ms;
 }
 
 .duration-500 {
   animation-duration: 500ms;
+}
+
+@keyframes slide-in-from-bottom-2 {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.slide-in-from-bottom-2 {
+  animation-name: slide-in-from-bottom-2;
+}
+
+@keyframes slide-in-from-bottom-4 {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.slide-in-from-bottom-4 {
+  animation-name: slide-in-from-bottom-4;
 }

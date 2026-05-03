@@ -1,20 +1,65 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useCallback, type FormEvent } from "react";
 import Link from "next/link";
 import { getCurrentLocation } from "@/app/services/location";
 import { sendVoiceTranscript } from "@/app/services/voice";
+import { getVendorsNearby } from "@/app/services/api";
 import VoiceDial from "@/app/components/VoiceDial";
-import MapView from "@/app/components/MapView";
+import OsmMapView from "@/app/components/OsmMapView";
+import { MobileAppFrame } from "@/app/components/MobileLayout";
+import { PillButton, StatusPill, DataCard, PillLink } from "@/app/components/Precision";
 import { Vendor, Location, VoiceResponse } from "@/app/shared/types";
+
+const QUICK_FOOD_PICKS = ["tacos", "ramen", "pizza", "empanadas", "falafel"];
+
+function uniqueMatchingLabels(vendors: Vendor[], limit = 10): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of vendors) {
+    for (const item of v.matchingItems ?? []) {
+      const raw = item.name.trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(raw);
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
 
 export default function SearchPage() {
   const [location, setLocation] = useState<Location | null>(null);
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [nearbyVendors, setNearbyVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [transcript, setTranscript] = useState("");
+  const [queryInput, setQueryInput] = useState("");
   const [hoveredVendor, setHoveredVendor] = useState<string | null>(null);
+  const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+
+  const refineChips = useMemo(() => {
+    const labels = uniqueMatchingLabels(vendors);
+    const q = transcript.trim().toLowerCase();
+    if (!q) return labels;
+    return labels.filter((label) => label.trim().toLowerCase() !== q);
+  }, [vendors, transcript]);
+
+  const mapVendors = useMemo(() => {
+    if (vendors.length > 0) return vendors;
+    return nearbyVendors;
+  }, [vendors, nearbyVendors]);
+
+  const mapPins = useMemo(() => mapVendors.filter((v) => v.location), [mapVendors]);
+
+  const onVendorSelect = useCallback((v: Vendor) => {
+    setSelectedVendor(v);
+    setHoveredVendor(v.vendorId);
+  }, []);
 
   useEffect(() => {
     getCurrentLocation()
@@ -22,14 +67,33 @@ export default function SearchPage() {
       .catch(() => setMessage("Enable location to find vendors"));
   }, []);
 
+  useEffect(() => {
+    if (!location) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { results } = await getVendorsNearby("", location.lat, location.lng);
+        if (!cancelled) setNearbyVendors(results ?? []);
+      } catch {
+        if (!cancelled) setNearbyVendors([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [location]);
+
   async function handleVoice(text: string) {
     if (!location) return;
-    setTranscript(text);
+    const q = text.trim();
+    if (!q) return;
+    setQueryInput(q);
+    setTranscript(q);
     setLoading(true);
     setMessage("");
 
     try {
-      const res: VoiceResponse = await sendVoiceTranscript(text, location.lat, location.lng);
+      const res: VoiceResponse = await sendVoiceTranscript(q, location.lat, location.lng);
       setVendors(res.results || []);
       setMessage(res.message);
     } catch {
@@ -39,161 +103,224 @@ export default function SearchPage() {
     }
   }
 
+  function onSearchSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    handleVoice(queryInput);
+  }
+
+  /** Full viewport below header; overlays use flex column so search never stacks on chips. */
+  const mapHeightStyle = { height: "calc(100dvh - 48px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))" };
+
   return (
-    <main className="min-h-screen bg-neutral-950 text-white flex flex-col">
-      {/* Header */}
-      <header className="sticky top-0 z-30 backdrop-blur-xl bg-neutral-950/80 border-b border-white/5">
-        <div className="max-w-lg mx-auto px-5 py-4 flex items-center justify-between">
-          <Link href="/" className="text-neutral-500 hover:text-white transition-colors text-sm font-medium">
-            Back
+    <MobileAppFrame>
+      <div className="page-enter relative min-h-[100dvh] bg-[var(--is-bg)]">
+        <header
+          className="z-[1000] flex h-12 shrink-0 items-center justify-between border-b-[0.5px] border-[var(--is-border-1)] bg-[var(--is-bg)] px-4"
+          style={{ paddingTop: "max(0px, env(safe-area-inset-top))" }}
+        >
+          <Link
+            href="/"
+            className="flex min-h-[44px] min-w-[44px] items-center text-[13px] font-medium text-[var(--is-blue)]"
+          >
+            ‹ Back
           </Link>
-          <span className="text-lg font-black tracking-tight">InfraStreet</span>
-          <div className="flex gap-3">
-            <Link href="/orders" className="text-neutral-400 text-sm font-medium hover:text-white transition-colors">
-              Orders
-            </Link>
-            <Link href="/deals" className="text-red-500 text-sm font-semibold">
+          <span className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--is-text-1)]">Map</span>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/deals"
+              className="flex min-h-[40px] items-center rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-3 text-[12px] font-medium text-[var(--is-text-2)]"
+            >
               Deals
             </Link>
+            <Link
+              href="/orders"
+              className="flex min-h-[40px] items-center rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-3 text-[12px] font-medium text-[var(--is-text-2)]"
+            >
+              Orders
+            </Link>
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* Sticky Map */}
-      {vendors.length > 0 && (
-        <div className="sticky top-[57px] z-20 border-b border-white/10">
-          <MapView
-            vendors={vendors}
-            userLocation={location}
-            highlightedVendor={hoveredVendor}
-          />
-        </div>
-      )}
-
-      {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-lg mx-auto px-5 pt-6 pb-40">
-          {/* Transcript */}
-          {transcript && (
-            <div className="mb-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <div className="inline-block bg-white/10 rounded-2xl px-5 py-3 border border-white/10">
-                <p className="text-sm text-neutral-300">
-                  <span className="text-neutral-500 mr-2">You said:</span>&quot;{transcript}&quot;
-                </p>
-              </div>
-            </div>
+        <div className="relative w-full overflow-hidden" style={mapHeightStyle}>
+          {location && (
+            <OsmMapView
+              userLocation={location}
+              vendors={mapPins}
+              highlightedVendorId={hoveredVendor ?? selectedVendor?.vendorId ?? null}
+              onVendorSelect={onVendorSelect}
+              className="absolute inset-0 z-0 !min-h-0 rounded-none border-0"
+            />
           )}
 
-          {/* Loading */}
-          {loading && (
-            <div className="flex flex-col items-center justify-center py-24">
-              <div className="relative">
-                <div className="w-16 h-16 rounded-full border-2 border-white/10" />
-                <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-transparent border-t-white animate-spin" />
-              </div>
-              <p className="text-neutral-500 text-sm mt-6 animate-pulse">Finding the best spots...</p>
-            </div>
-          )}
+          <div className="pointer-events-none absolute top-0 right-0 left-0 z-[1000] flex flex-col gap-3 px-4 pt-3">
+            <form
+              onSubmit={onSearchSubmit}
+              className="pointer-events-auto flex items-center gap-2 rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.35)]"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0 text-[var(--is-text-4)]" aria-hidden>
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M20 20l-4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <input
+                type="search"
+                enterKeyHint="search"
+                autoComplete="off"
+                placeholder="Search stalls…"
+                disabled={!location || loading}
+                value={queryInput}
+                onChange={(e) => setQueryInput(e.target.value)}
+                className="min-h-[44px] min-w-0 flex-1 bg-transparent text-[15px] text-[var(--is-text-1)] placeholder:text-[var(--is-text-4)] outline-none"
+              />
+              <VoiceDial onTranscript={handleVoice} disabled={!location || loading} variant="dark" />
+            </form>
 
-          {/* Message */}
-          {message && !loading && vendors.length === 0 && (
-            <div className="text-center py-8">
-              <p className="text-neutral-400">{message}</p>
-            </div>
-          )}
-
-          {/* Empty */}
-          {vendors.length === 0 && !loading && !message && (
-            <div className="text-center py-20">
-              <div className="mb-8">
-                <div className="w-24 h-24 mx-auto rounded-full bg-gradient-to-br from-red-500/20 to-orange-500/20 flex items-center justify-center border border-white/5">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-orange-500 animate-pulse" />
-                </div>
-              </div>
-              <h2 className="text-3xl font-black mb-3">What are you craving?</h2>
-              <p className="text-neutral-500 text-lg">Hold the button and speak</p>
-              <div className="mt-8 flex flex-wrap justify-center gap-2">
-                {["tacos", "ramen", "pizza", "empanadas", "falafel"].map((food) => (
-                  <span key={food} className="px-4 py-2 rounded-full bg-white/5 text-neutral-400 text-sm border border-white/5">
-                    {food}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Results */}
-          {vendors.length > 0 && !loading && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-neutral-500 text-sm font-medium uppercase tracking-wider">
-                  {vendors.length} {vendors.length === 1 ? "result" : "results"}
-                </h3>
+            <div className="pointer-events-auto flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [mask-image:linear-gradient(to_right,black_92%,transparent)]">
+              {QUICK_FOOD_PICKS.map((food) => (
                 <button
-                  onClick={() => { setVendors([]); setTranscript(""); setMessage(""); }}
-                  className="text-neutral-500 text-sm hover:text-white transition-colors"
+                  key={food}
+                  type="button"
+                  disabled={!location || loading}
+                  onClick={() => {
+                    setActiveFilter(food);
+                    handleVoice(food);
+                  }}
+                  className={`shrink-0 rounded-[20px] border-[0.5px] px-[14px] py-1.5 text-[13px] font-medium whitespace-nowrap ${
+                    activeFilter === food
+                      ? "border-[var(--is-purple)] bg-[var(--is-purple-tint)] text-[var(--is-purple)]"
+                      : "border-[var(--is-border-1)] bg-[var(--is-surface)] text-[var(--is-text-3)]"
+                  }`}
                 >
-                  Clear
+                  {food}
                 </button>
-              </div>
-              
-              <div className="space-y-3">
-                {vendors.map((v, index) => (
-                  <Link
-                    key={v.vendorId}
-                    href={`/vendor/${v.vendorId}`}
-                    className="block group animate-in fade-in slide-in-from-bottom-2 duration-300"
-                    style={{ animationDelay: `${index * 50}ms` }}
-                    onMouseEnter={() => setHoveredVendor(v.vendorId)}
-                    onMouseLeave={() => setHoveredVendor(null)}
-                  >
-                    <div className={`relative bg-white/5 rounded-2xl p-5 border transition-all duration-300 hover:scale-[1.02] ${
-                      hoveredVendor === v.vendorId ? "border-white/30 bg-white/10" : "border-white/10"
-                    }`}>
-                      {v.distance_m && (
-                        <div className="absolute top-4 right-4 bg-white/10 px-3 py-1 rounded-full">
-                          <span className="text-xs font-medium text-neutral-300">
-                            {v.distance_m < 1000 ? `${v.distance_m}m` : `${(v.distance_m / 1000).toFixed(1)}km`}
-                          </span>
-                        </div>
-                      )}
+              ))}
+            </div>
+          </div>
 
-                      <div className="pr-16">
-                        <h3 className="text-xl font-bold">{v.name}</h3>
-                        {v.businessHours && (
-                          <p className="text-neutral-500 text-sm mt-1">{v.businessHours}</p>
-                        )}
-                      </div>
+          {loading && (
+            <div className="absolute right-4 bottom-24 left-4 z-[998] rounded-[16px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] p-4">
+              <div className="skeleton mb-3 h-4 w-3/4" />
+              <div className="skeleton h-4 w-1/2" />
+            </div>
+          )}
 
-                      {v.matchingItems && v.matchingItems.length > 0 && (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {v.matchingItems.slice(0, 3).map((item, i) => (
-                            <div key={i} className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-xl px-3 py-1.5">
-                              <span className="text-sm text-green-400">{item.name}</span>
-                              <span className="text-xs text-green-500/70">${item.price.toFixed(2)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="absolute bottom-5 right-5 w-8 h-8 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-colors">
-                        <span className="text-neutral-400 group-hover:text-white transition-colors">→</span>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
+          {message && !loading && vendors.length === 0 && (
+            <div className="absolute bottom-24 left-4 z-[998] max-w-[calc(100%-32px)]">
+              <DataCard>
+                <p className="text-[13px] text-[var(--is-text-2)]">{message}</p>
+                <PillButton type="button" variant="ghost" className="mt-3" onClick={() => setMessage("")}>
+                  Dismiss
+                </PillButton>
+              </DataCard>
             </div>
           )}
         </div>
-      </div>
 
-      {/* Voice Button */}
-      <div className="fixed bottom-0 left-0 right-0 pb-8 pt-20 bg-gradient-to-t from-neutral-950 via-neutral-950/95 to-transparent pointer-events-none z-10">
-        <div className="max-w-lg mx-auto px-5 pointer-events-auto">
-          <VoiceDial onTranscript={handleVoice} />
-        </div>
+        {selectedVendor && (
+          <div
+            className="fixed right-0 bottom-0 left-0 z-[1001] mx-auto max-w-[430px] rounded-t-[24px] border-t-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-5 pt-3"
+            style={{ paddingBottom: "calc(20px + env(safe-area-inset-bottom))", height: "45vh" }}
+          >
+            <div className="skeleton mx-auto mb-4 h-1 w-9 rounded-full bg-[var(--is-border-1)]" />
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-[17px] font-semibold tracking-[-0.02em] text-[var(--is-text-1)]">
+                  {selectedVendor.name}
+                </h2>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <StatusPill kind="ready">Open</StatusPill>
+                  {selectedVendor.distance_m != null && (
+                    <span className="text-[13px] text-[var(--is-text-3)] [font-variant-numeric:tabular-nums]">
+                      {selectedVendor.distance_m < 1000
+                        ? `${selectedVendor.distance_m}m`
+                        : `${(selectedVendor.distance_m / 1000).toFixed(1)}km`}{" "}
+                      away
+                    </span>
+                  )}
+                </div>
+                {selectedVendor.businessHours && (
+                  <p className="mt-2 text-[12px] text-[var(--is-text-3)]">{selectedVendor.businessHours}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                aria-label="Close sheet"
+                className="flex size-11 items-center justify-center text-[var(--is-text-4)]"
+                onClick={() => setSelectedVendor(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="mt-4 max-h-[30%] overflow-y-auto">
+              {selectedVendor.matchingItems?.slice(0, 4).map((item, i) => (
+                <div key={i} className="flex justify-between border-b-[0.5px] border-[var(--is-border-2)] py-2 text-[13px]">
+                  <span className="text-[var(--is-text-2)]">{item.name}</span>
+                  <span className="[font-variant-numeric:tabular-nums] text-[var(--is-text-1)]">${item.price.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4">
+              <PillLink href={`/vendor/${selectedVendor.vendorId}`}>See menu</PillLink>
+            </div>
+          </div>
+        )}
+
+        {!selectedVendor && vendors.length > 0 && !loading && (
+          <div
+            className="fixed right-0 bottom-0 left-0 z-[1000] mx-auto max-h-[40vh] max-w-[430px] overflow-y-auto border-t-[0.5px] border-[var(--is-border-1)] bg-[var(--is-bg)] px-4 py-4"
+            style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+          >
+            <div className="item-stagger mb-3 flex items-center justify-between">
+              <span className="text-[11px] font-semibold tracking-[0.08em] text-[var(--is-text-4)] uppercase">
+                {vendors.length} results
+              </span>
+              <button
+                type="button"
+                className="text-[13px] font-medium text-[var(--is-blue)]"
+                onClick={() => {
+                  setVendors([]);
+                  setTranscript("");
+                  setMessage("");
+                  setQueryInput("");
+                }}
+              >
+                Clear
+              </button>
+            </div>
+            {refineChips.length > 0 && (
+              <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+                {refineChips.map((label) => (
+                  <button
+                    key={label}
+                    type="button"
+                    disabled={loading}
+                    onClick={() => handleVoice(label)}
+                    className="shrink-0 rounded-[20px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-card)] px-3 py-1.5 text-[12px] text-[var(--is-text-2)]"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="item-stagger space-y-2">
+              {vendors.map((v) => (
+                <button
+                  key={v.vendorId}
+                  type="button"
+                  onClick={() => onVendorSelect(v)}
+                  className="flex w-full min-h-[44px] items-center justify-between rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-4 py-3 text-left"
+                >
+                  <span className="text-[15px] font-medium text-[var(--is-text-1)]">{v.name}</span>
+                  <span className="text-[12px] text-[var(--is-text-4)]">→</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {transcript && vendors.length === 0 && !loading && (
+          <p className="px-4 py-2 text-center text-[12px] text-[var(--is-text-3)]">Searching: &quot;{transcript}&quot;</p>
+        )}
       </div>
-    </main>
+    </MobileAppFrame>
   );
 }
