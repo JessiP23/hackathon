@@ -62,6 +62,62 @@ class DealService:
         finally:
             db.close()
 
+    def get_active_deals_for_vendor(self, vendor_id: str, limit: int = 20) -> dict:
+        """Active flash deals for one vendor (for stall page / demos — no geo cut-off)."""
+        db = SessionLocal()
+        try:
+            deals = db.execute(
+                text(
+                    """
+                    SELECT
+                        d.id as deal_id, d.vendor_id, d.item_name,
+                        d.original_price, d.deal_price, d.discount_pct,
+                        d.remaining_quantity, d.end_at, d.status, d.media_url,
+                        d.pickup_area,
+                        ST_Y(d.location::geometry) as deal_lat,
+                        ST_X(d.location::geometry) as deal_lng,
+                        v.name as vendor_name, v.reliability_score
+                    FROM flash_deals d
+                    JOIN vendors v ON v.id = d.vendor_id
+                    WHERE d.vendor_id = :vid
+                      AND d.status = 'active'
+                      AND d.end_at > NOW()
+                      AND d.remaining_quantity > 0
+                    ORDER BY d.end_at ASC
+                    LIMIT :lim
+                    """
+                ),
+                {"vid": vendor_id, "lim": limit},
+            ).fetchall()
+            out = []
+            for d in deals:
+                reliability = float(d.reliability_score or 50)
+                discount = float(d.discount_pct or 0)
+                out.append(
+                    {
+                        "dealId": d.deal_id,
+                        "vendorId": d.vendor_id,
+                        "vendorName": d.vendor_name,
+                        "itemName": d.item_name,
+                        "originalPrice": float(d.original_price) if d.original_price else None,
+                        "dealPrice": float(d.deal_price) if d.deal_price else None,
+                        "discountPct": discount,
+                        "remainingQuantity": d.remaining_quantity,
+                        "expiresAt": d.end_at.isoformat() if d.end_at else None,
+                        "distance_m": 0,
+                        "distanceMiles": 0.0,
+                        "mediaUrl": d.media_url,
+                        "pickupArea": getattr(d, "pickup_area", None) or None,
+                        "lat": float(d.deal_lat) if getattr(d, "deal_lat", None) is not None else None,
+                        "lng": float(d.deal_lng) if getattr(d, "deal_lng", None) is not None else None,
+                        "reliabilityScore": reliability,
+                        "rankScore": 0.0,
+                    }
+                )
+            return {"deals": out}
+        finally:
+            db.close()
+
     # Alias used by older router
     def find_nearby(self, lat: float, lng: float, limit: int = 120):
         return self.get_deals_nearby(lat, lng, limit)

@@ -60,35 +60,50 @@ function CheckoutInner() {
       ? Math.round(Math.max(0, subtotal + platformFee - total) * 100) / 100
       : 0;
 
+  const backHref =
+    order && order.vendorId != null ? `/vendor/${order.vendorId}` : "/deals";
+
   if (order === undefined) {
     return (
-      <main className="page-enter px-5 py-8">
-        <div className="skeleton mb-4 h-28 w-full rounded-[16px]" />
-        <div className="skeleton h-14 w-full rounded-[12px]" />
-      </main>
+      <>
+        <MobileNav title="Checkout" backHref="/deals" />
+        <main className="page-enter px-5 py-8">
+          <div className="skeleton mb-4 h-28 w-full rounded-[16px]" />
+          <div className="skeleton h-14 w-full rounded-[12px]" />
+        </main>
+      </>
     );
   }
 
   if (!orderId || order === null) {
     return (
-      <main className="page-enter px-5 py-10">
-        <DataCard>
-          <p className="text-[15px] text-[var(--is-text-2)]">Missing checkout session.</p>
-        </DataCard>
-      </main>
+      <>
+        <MobileNav title="Checkout" backHref="/deals" />
+        <main className="page-enter px-5 py-10">
+          <DataCard>
+            <p className="text-[15px] text-[var(--is-text-2)]">Missing checkout session.</p>
+          </DataCard>
+        </main>
+      </>
     );
   }
 
   return (
-    <main
-      className="page-enter px-5 py-6"
-      data-stripe-primary={stripeElementsAppearance.variables.colorPrimary}
-    >
+    <>
+      <MobileNav title="Checkout" backHref={backHref} />
+      <main
+        className="page-enter px-5 py-6"
+        data-stripe-primary={stripeElementsAppearance.variables.colorPrimary}
+      >
       <DataCard className="mb-6">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-[17px] font-bold tracking-[-0.02em] text-[var(--is-text-1)]">{order.vendorName ?? "Vendor"}</p>
-            {order.dealId && <p className="mt-1 text-[12px] text-[var(--is-text-3)]">Flash deal checkout</p>}
+            {order.dealId ? (
+              <p className="mt-1 text-[12px] text-[var(--is-text-3)]">Flash deal checkout</p>
+            ) : (
+              <p className="mt-1 text-[12px] text-[var(--is-text-3)]">Menu order checkout</p>
+            )}
           </div>
           <p className="text-[22px] font-bold tracking-[-0.03em] text-[var(--is-text-1)] [font-variant-numeric:tabular-nums]">
             ${total.toFixed(2)}
@@ -182,18 +197,21 @@ function CheckoutInner() {
         </span>
       </div>
     </main>
+    </>
   );
 }
 
 export default function CheckoutPage() {
   return (
     <MobileAppFrame>
-      <MobileNav title="Checkout" backHref="/deals" />
       <Suspense
         fallback={
-          <div className="px-5 py-8">
-            <div className="skeleton h-28 w-full rounded-[16px]" />
-          </div>
+          <>
+            <MobileNav title="Checkout" backHref="/deals" />
+            <div className="px-5 py-8">
+              <div className="skeleton h-28 w-full rounded-[16px]" />
+            </div>
+          </>
         }
       >
         <CheckoutInner />

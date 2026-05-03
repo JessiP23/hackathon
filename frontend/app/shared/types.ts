@@ -32,6 +32,9 @@ export interface Vendor {
   menu?: MenuItem[];
   matchingItems?: { name: string; price: number }[];
   reliabilityScore?: number;
+  /** When true, automated Brain may post timed flash deals (see /deals). Managed in Telegram /brain. */
+  brainEnabled?: boolean;
+  neighborhood?: string | null;
 }
 
 export interface Deal {
@@ -69,6 +72,8 @@ export interface Order {
   checkoutUrl?: string;
   stripePaymentIntent?: string | null;
   createdAt?: string;
+  pointsRedeemed?: number;
+  pointsDiscount?: number;
 }
 
 export interface VoiceResponse {

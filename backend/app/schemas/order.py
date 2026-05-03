@@ -15,6 +15,7 @@ class OrderCreate(BaseModel):
     vendorId: str
     customerPhone: Optional[str] = None
     items: List[OrderItemCreate]
+    redeemPoints: int = 0
 
 class OrderResponse(BaseModel):
     orderId: str

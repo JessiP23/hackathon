@@ -8,7 +8,10 @@ service = OrderService()
 
 @router.post("")
 def create_order(payload: OrderCreate):
-    return service.create_order(payload)
+    body = service.create_order(payload)
+    if isinstance(body, dict) and body.get("error"):
+        raise HTTPException(status_code=400, detail=body["error"])
+    return body
 
 
 @router.get("/recommendations/{phone}")

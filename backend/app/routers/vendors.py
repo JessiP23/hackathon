@@ -33,9 +33,10 @@ def get_vendor(vendor_id: str):
     return v
 
 
-@router.get("/{vendor_id}/stats")
-def get_vendor_stats(vendor_id: str, days: int = Query(7)):
-    return deal_svc.get_vendor_stats(vendor_id, days)
+@router.get("/{vendor_id}/deals")
+def vendor_active_deals(vendor_id: str):
+    """Live flash deals for this stall (menu price is separate)."""
+    return deal_svc.get_active_deals_for_vendor(vendor_id)
 
 
 @router.post("/{vendor_id}/menu")

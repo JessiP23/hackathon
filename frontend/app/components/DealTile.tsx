@@ -14,13 +14,15 @@ const OsmMapView = dynamic(() => import("./OsmMapView"), {
 interface Props {
   deal: Deal;
   stackIndex: number;
-  onReserve: (deal: Deal) => void;
+  onReserve: (deal: Deal, quantity: number) => void;
   onSwipeNext: () => void;
   isTop: boolean;
   /** When true, deals page renders one shared map behind the stack; top map-card hero is transparent. */
   sharedMapLayerActive?: boolean;
   /** Shown on map with pickup pin; optional when geolocation denied. */
   userLocation: Location | null;
+  /** Initial quantity (e.g. from /deals?deal=&qty=). Clamped to remaining stock. */
+  quantitySeed?: number;
 }
 
 function formatRemaining(expiresAt: string) {
@@ -48,6 +50,7 @@ function DealTileInner({
   isTop,
   sharedMapLayerActive = false,
   userLocation,
+  quantitySeed = 1,
 }: Props) {
   const x = useMotionValue(0);
   const lastTap = useRef<number>(0);
@@ -133,6 +136,24 @@ function DealTileInner({
   const rot = useTransform(x, [-200, 200], [-6, 6]);
 
   const price = deal.dealPrice?.toFixed(0) ?? "—";
+
+  const maxReserveQty = useMemo(() => {
+    const r = deal.remainingQuantity;
+    if (r != null && r > 0) return Math.min(99, r);
+    return 99;
+  }, [deal.remainingQuantity]);
+
+  const [reserveQty, setReserveQty] = useState(1);
+
+  useEffect(() => {
+    const seed = Number.isFinite(quantitySeed) && quantitySeed > 0 ? quantitySeed : 1;
+    setReserveQty(Math.max(1, Math.min(maxReserveQty, Math.floor(seed))));
+  }, [deal.dealId, maxReserveQty, quantitySeed]);
+
+  const lineTotal =
+    typeof deal.dealPrice === "number" && !Number.isNaN(deal.dealPrice)
+      ? (deal.dealPrice * reserveQty).toFixed(2)
+      : "—";
 
   const mapsUrl =
     deal.lat != null && deal.lng != null
@@ -273,17 +294,48 @@ function DealTileInner({
         ) : null}
       </p>
 
-      <div className="mt-3">
+      <div className="mt-3 space-y-3">
+        <div className="flex items-center justify-center gap-3">
+          <button
+            type="button"
+            aria-label="Fewer"
+            disabled={reserveQty <= 1}
+            onClick={(e) => {
+              e.stopPropagation();
+              vibrate(10);
+              setReserveQty((q) => Math.max(1, q - 1));
+            }}
+            className="flex size-11 items-center justify-center rounded-full border border-[var(--is-border-1)] bg-[var(--is-surface)] text-[18px] font-bold text-[var(--is-text-1)] disabled:opacity-35"
+          >
+            −
+          </button>
+          <span className="min-w-[2.5rem] text-center text-[17px] font-semibold tabular-nums text-[var(--is-text-1)]">
+            {reserveQty}
+          </span>
+          <button
+            type="button"
+            aria-label="More"
+            disabled={reserveQty >= maxReserveQty}
+            onClick={(e) => {
+              e.stopPropagation();
+              vibrate(10);
+              setReserveQty((q) => Math.min(maxReserveQty, q + 1));
+            }}
+            className="flex size-11 items-center justify-center rounded-full border border-[var(--is-border-1)] bg-[var(--is-surface)] text-[18px] font-bold text-[var(--is-text-1)] disabled:opacity-35"
+          >
+            +
+          </button>
+        </div>
         <PillButton
           variant="danger"
-          className="mt-3"
+          className="mt-0 w-full"
           type="button"
           onClick={() => {
             vibrate(20);
-            onReserve(deal);
+            onReserve(deal, reserveQty);
           }}
         >
-          Reserve now — ${price}
+          {reserveQty > 1 ? `Reserve ${reserveQty} · $${lineTotal}` : `Reserve now — $${price}`}
         </PillButton>
       </div>
     </div>
@@ -433,7 +485,8 @@ function dealTilePropsEqual(prev: Props, next: Props) {
     prev.userLocation?.lat === next.userLocation?.lat &&
     prev.userLocation?.lng === next.userLocation?.lng &&
     prev.onReserve === next.onReserve &&
-    prev.onSwipeNext === next.onSwipeNext
+    prev.onSwipeNext === next.onSwipeNext &&
+    prev.quantitySeed === next.quantitySeed
   );
 }
 

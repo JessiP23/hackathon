@@ -74,9 +74,15 @@ export async function addMenuItem(vendorId: string, itemName: string, price: num
 export async function placeOrder(data: {
   vendorId: string;
   customerPhone?: string;
+  redeemPoints?: number;
   items: { itemId: string; quantity: number }[];
 }): Promise<Order> {
-  const res = await api.post("/orders", data);
+  const res = await api.post("/orders", {
+    vendorId: data.vendorId,
+    customerPhone: data.customerPhone,
+    redeemPoints: data.redeemPoints ?? 0,
+    items: data.items,
+  });
   return res.data;
 }
 
@@ -134,6 +140,16 @@ export async function getDealsNearby(lat: number, lng: number): Promise<Deal[]> 
   try {
     const res = await api.get("/deals", { params: { lat, lng } });
     return res.data.deals || res.data || [];
+  } catch {
+    return [];
+  }
+}
+
+/** Active flash deals for one stall (vendor menu page). */
+export async function getVendorActiveDeals(vendorId: string): Promise<Deal[]> {
+  try {
+    const res = await api.get(`/vendors/${vendorId}/deals`);
+    return res.data.deals || [];
   } catch {
     return [];
   }

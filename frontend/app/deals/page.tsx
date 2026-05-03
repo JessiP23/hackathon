@@ -24,6 +24,7 @@ export default function DealsPage() {
   const [loading, setLoading] = useState(true);
   const [ordering, setOrdering] = useState<string | null>(null);
   const [focusDealId, setFocusDealId] = useState<string | null>(null);
+  const [dealLinkQty, setDealLinkQty] = useState(1);
   const [stackIndex, setStackIndex] = useState(0);
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [notifyMsg, setNotifyMsg] = useState<string | null>(null);
@@ -46,7 +47,11 @@ export default function DealsPage() {
   useEffect(() => {
     const q =
       typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("deal") : null;
+    const rawQty =
+      typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("qty") : null;
     setFocusDealId(q);
+    const n = rawQty ? parseInt(rawQty, 10) : 1;
+    setDealLinkQty(Number.isFinite(n) && n > 0 ? Math.min(99, n) : 1);
   }, []);
 
   useEffect(() => {
@@ -66,7 +71,7 @@ export default function DealsPage() {
   const FEE = 0.15;
 
   const handleReserve = useCallback(
-    async (deal: Deal) => {
+    async (deal: Deal, quantity: number) => {
       const phone = localStorage.getItem("infrastreet_phone");
       if (!phone) {
         if (isDemoBrowse()) {
@@ -78,7 +83,11 @@ export default function DealsPage() {
       }
       setOrdering(deal.dealId);
       try {
-        const qty = 1;
+        const max =
+          deal.remainingQuantity != null && deal.remainingQuantity > 0
+            ? deal.remainingQuantity
+            : 99;
+        const qty = Math.max(1, Math.min(max, Math.floor(quantity) || 1));
         const vendorSubtotal = deal.dealPrice * qty;
         const preTotal = Math.round(vendorSubtotal * (1 + FEE) * 100) / 100;
         const maxCents = Math.floor(preTotal * 0.5 * 100);
@@ -330,6 +339,7 @@ export default function DealsPage() {
                 isTop={i === 0}
                 userLocation={location}
                 sharedMapLayerActive={sharedMapOpen}
+                quantitySeed={focusDealId === deal.dealId ? dealLinkQty : 1}
                 onReserve={handleReserve}
                 onSwipeNext={onSwipeNext}
               />

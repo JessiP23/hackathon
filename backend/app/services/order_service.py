@@ -100,12 +100,12 @@ class OrderService:
 
         checkout = stripe_service.create_checkout_session(
             order_id=order_id,
-            deal_id=deal_id,
             vendor_id=deal.vendor_id,
             item_name=deal.item_name,
             quantity=quantity,
             vendor_price=vendor_price,
             points_discount=discount,
+            deal_id=deal_id,
         )
 
         return {
@@ -148,27 +148,39 @@ class OrderService:
 
         if row:
             items = row.items if isinstance(row.items, list) else json.loads(row.items or "[]")
-            qty = sum(i.get("quantity", 1) for i in items)
             end_str = row.end_at.strftime("%I:%M%p") if row.end_at else "end of deal"
+            deal_item = getattr(row, "deal_item", None) or ""
+            if not deal_item and items:
+                deal_item = ", ".join(
+                    f"{i.get('quantity', 1)}× {i.get('name', 'Item')}" for i in items[:4]
+                )
+                if len(items) > 4:
+                    deal_item += "…"
+            if not deal_item:
+                deal_item = "Your order"
+
+            is_menu = not row.deal_id
+            time_line = f"Recoge antes de {end_str}" if not is_menu else "Listo para recoger en el puesto"
 
             # Notify customer
             from app.services.notify_service import notify_service
             notify_service.notify_customer_confirmation(
                 row.customer_phone,
                 f"✅ Orden confirmada #{row.pickup_code}\n"
-                f"{qty}x {row.deal_item} @ {row.vendor_name}\n"
-                f"Recoge antes de {end_str}\n"
+                f"{deal_item} @ {row.vendor_name}\n"
+                f"{time_line}\n"
                 f"Código: {row.pickup_code}"
             )
             # Notify vendor
             fe = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+            subtotal = float(row.total or 0) - float(row.service_fee or 0)
             notify_service.notify_vendor_order(
                 row.vendor_phone,
                 f"Nueva orden #{row.pickup_code}\n"
-                f"{qty}x {row.deal_item} - ${float(row.total or 0) - float(row.service_fee or 0):.2f}\n"
+                f"{deal_item} - ${subtotal:.2f}\n"
                 f"Cliente: {row.customer_phone}\n"
-                f"Pickup antes de {end_str}\n"
-                f"Ver: {fe}/orders/{order_id}"
+                + (f"Deal hasta {end_str}\n" if not is_menu else "")
+                + f"Ver: {fe}/orders/{order_id}"
             )
 
         return {"ok": True}
@@ -198,54 +210,124 @@ class OrderService:
             db.close()
         return {"ok": True}
 
-    # ── Legacy create_order (menu-based, no deal) ──────────────────────
+    # ── Menu cart checkout (Stripe, same fee + points model as flash deals) ─
     def create_order(self, payload) -> dict:
+        from app.services.user_service import UserService
+        from app.services.stripe_service import stripe_service
+
+        us = UserService()
+        if hasattr(payload, "vendorId"):
+            vendor_id = payload.vendorId
+            customer_phone = payload.customerPhone or ""
+            redeem_points = int(getattr(payload, "redeemPoints", 0) or 0)
+            items = [{"itemId": i.itemId, "quantity": i.quantity} for i in payload.items]
+        else:
+            vendor_id = payload.get("vendorId")
+            customer_phone = payload.get("customerPhone") or ""
+            redeem_points = int(payload.get("redeemPoints") or 0)
+            items = payload.get("items", [])
+
+        if not customer_phone:
+            return {"error": "customerPhone is required for checkout"}
+
         db = SessionLocal()
         try:
-            if hasattr(payload, 'vendorId'):
-                vendor_id = payload.vendorId
-                customer_phone = payload.customerPhone
-                items = [{"itemId": i.itemId, "quantity": i.quantity} for i in payload.items]
-            else:
-                vendor_id = payload.get("vendorId")
-                customer_phone = payload.get("customerPhone")
-                items = payload.get("items", [])
-
             item_ids = [i["itemId"] for i in items]
             menu_items = db.execute(
                 text("SELECT id, item_name, price FROM menus WHERE id = ANY(:ids)"),
-                {"ids": item_ids}
+                {"ids": item_ids},
             ).fetchall()
             menu_map = {m.id: {"name": m.item_name, "price": float(m.price)} for m in menu_items}
 
             order_items = []
-            total = 0
+            vendor_subtotal = 0.0
             for item in items:
                 item_id = item["itemId"]
-                qty = item["quantity"]
-                if item_id in menu_map:
-                    m = menu_map[item_id]
-                    order_items.append({"itemId": item_id, "name": m["name"], "price": m["price"], "quantity": qty})
-                    total += m["price"] * qty
+                qty = int(item["quantity"])
+                if item_id not in menu_map:
+                    continue
+                m = menu_map[item_id]
+                order_items.append(
+                    {"itemId": item_id, "name": m["name"], "price": m["price"], "quantity": qty}
+                )
+                vendor_subtotal += m["price"] * qty
 
-            pickup_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+            if not order_items:
+                return {"error": "No valid menu items in cart"}
+
+            vrow = db.execute(
+                text("SELECT name FROM vendors WHERE id = :vid LIMIT 1"),
+                {"vid": vendor_id},
+            ).fetchone()
+            vendor_name = vrow[0] if vrow else "Vendor"
+
+            service_fee = round(vendor_subtotal * service_fee_rate(), 2)
+            customer_total_pre = round(vendor_subtotal + service_fee, 2)
+            max_disc = round(customer_total_pre * 0.5, 2)
+            spent_pts, discount = us.try_redeem_with_session(
+                db, customer_phone, redeem_points, max_disc
+            )
+            customer_total = round(max(0.5, customer_total_pre - discount), 2)
+            pickup_code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
+            n = len(order_items)
+            if n == 1:
+                stripe_label = order_items[0]["name"]
+            else:
+                stripe_label = f"{order_items[0]['name']} + {n - 1} more ({vendor_name})"
+
+            total_qty = sum(i["quantity"] for i in order_items)
+
             result = db.execute(
                 text("""
-                    INSERT INTO orders (id, vendor_id, customer_phone, items, total, status, pickup_code, created_at)
-                    VALUES ('o_' || substr(md5(random()::text),1,8), :vid, :phone,
-                            CAST(:items AS jsonb), :total, 'pending', :code, NOW())
-                    RETURNING id
+                    INSERT INTO orders (
+                        id, vendor_id, customer_phone, deal_id, items, total,
+                        service_fee, status, pickup_code, created_at
+                    ) VALUES (
+                        'o_' || substr(md5(random()::text), 1, 8),
+                        :vendor_id, :customer_phone, NULL,
+                        CAST(:items_json AS jsonb),
+                        :total, :service_fee, 'pending_payment', :pickup_code, NOW()
+                    ) RETURNING id
                 """),
-                {"vid": vendor_id, "phone": customer_phone,
-                 "items": json.dumps(order_items), "total": total, "code": pickup_code}
+                {
+                    "vendor_id": vendor_id,
+                    "customer_phone": customer_phone,
+                    "items_json": json.dumps(order_items),
+                    "total": customer_total,
+                    "service_fee": service_fee,
+                    "pickup_code": pickup_code,
+                },
             )
-            db.commit()
             row = result.fetchone()
-            order_id = row[0] if row else None
-            return {"orderId": order_id, "vendorId": vendor_id, "items": order_items,
-                    "total": total, "status": "pending", "pickupCode": pickup_code}
+            if row is None:
+                raise RuntimeError("Failed to create order")
+            order_id = row[0]
+            db.commit()
         finally:
             db.close()
+
+        checkout = stripe_service.create_checkout_session(
+            order_id=order_id,
+            vendor_id=vendor_id,
+            item_name=stripe_label[:120],
+            quantity=max(1, total_qty),
+            vendor_price=vendor_subtotal,
+            points_discount=discount,
+            deal_id=None,
+        )
+
+        return {
+            "orderId": order_id,
+            "checkoutUrl": checkout.get("checkout_url"),
+            "pickupCode": pickup_code,
+            "total": customer_total,
+            "status": "pending_payment",
+            "vendorId": vendor_id,
+            "items": order_items,
+            "pointsRedeemed": spent_pts,
+            "pointsDiscount": discount,
+        }
 
     def get_order(self, order_id: str):
         db = SessionLocal()

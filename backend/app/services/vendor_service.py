@@ -39,22 +39,39 @@ class VendorService:
     def get_vendor(self, vendor_id: str):
         db = SessionLocal()
         try:
-            vendor = db.execute(
-                text("""
-                    SELECT id, name, phone, business_hours,
-                           ST_Y(location::geometry) as lat,
-                           ST_X(location::geometry) as lng
-                    FROM vendors WHERE id = :id
-                """),
-                {"id": vendor_id}
-            ).fetchone()
+            try:
+                vendor = db.execute(
+                    text("""
+                        SELECT id, name, phone, business_hours,
+                               COALESCE(brain_enabled, false) AS brain_enabled,
+                               COALESCE(neighborhood, '') AS neighborhood,
+                               ST_Y(location::geometry) AS lat,
+                               ST_X(location::geometry) AS lng
+                        FROM vendors WHERE id = :id
+                    """),
+                    {"id": vendor_id},
+                ).fetchone()
+            except Exception:
+                db.rollback()
+                vendor = db.execute(
+                    text("""
+                        SELECT id, name, phone, business_hours,
+                               ST_Y(location::geometry) AS lat,
+                               ST_X(location::geometry) AS lng
+                        FROM vendors WHERE id = :id
+                    """),
+                    {"id": vendor_id},
+                ).fetchone()
 
             if not vendor:
                 return None
 
+            brain_enabled = bool(getattr(vendor, "brain_enabled", False))
+            neighborhood = getattr(vendor, "neighborhood", "") or ""
+
             menu_rows = db.execute(
                 text("SELECT id, item_name, description, price, is_available FROM menus WHERE vendor_id = :vid"),
-                {"vid": vendor_id}
+                {"vid": vendor_id},
             ).fetchall()
 
             return {
@@ -63,16 +80,18 @@ class VendorService:
                 "phone": vendor.phone,
                 "businessHours": vendor.business_hours,
                 "location": {"lat": vendor.lat, "lng": vendor.lng} if vendor.lat else None,
+                "brainEnabled": brain_enabled,
+                "neighborhood": neighborhood or None,
                 "menu": [
                     {
                         "itemId": row.id,
                         "name": row.item_name,
                         "description": row.description,
                         "price": float(row.price or 0),
-                        "isAvailable": row.is_available
+                        "isAvailable": row.is_available,
                     }
                     for row in menu_rows
-                ]
+                ],
             }
         finally:
             db.close()
