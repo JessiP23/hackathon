@@ -95,10 +95,17 @@ export default function OsmMapInner({
 
     if (!mapRef.current) {
       const map = L.map(el, {
-        zoomControl: true,
+        zoomControl: false,
         attributionControl: true,
         scrollWheelZoom: true,
+        touchZoom: true,
+        dragging: true,
+        doubleClickZoom: true,
+        boxZoom: false,
+        keyboard: false,
       }).setView(center, 14);
+
+      L.control.zoom({ position: "bottomright" }).addTo(map);
 
       L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
         attribution: "© OpenStreetMap © CARTO",

@@ -193,17 +193,16 @@ export default function DealsPage() {
     topDeal && !topDeal.mediaUrl && topDeal.lat != null && topDeal.lng != null,
   );
 
-  const stackMapVendors: Vendor[] = useMemo(
-    () =>
-      sortedDeals
-        .filter((d) => d.lat != null && d.lng != null)
-        .map((d) => ({
-          vendorId: d.dealId,
-          name: d.vendorName ?? d.pickupArea ?? "Pickup",
-          location: { lat: d.lat!, lng: d.lng! },
-        })),
-    [sortedDeals],
-  );
+  const stackMapVendors: Vendor[] = useMemo(() => {
+    if (!topDeal || topDeal.lat == null || topDeal.lng == null) return [];
+    return [
+      {
+        vendorId: topDeal.dealId,
+        name: topDeal.vendorName ?? topDeal.pickupArea ?? "Pickup",
+        location: { lat: topDeal.lat, lng: topDeal.lng },
+      },
+    ];
+  }, [topDeal]);
 
   function DealSkeleton({ i }: { i: number }) {
     return (
@@ -211,7 +210,9 @@ export default function DealsPage() {
         className="absolute inset-0 flex flex-col justify-end bg-[var(--is-bg)]"
         style={{ zIndex: 20 - i, transform: `scale(${1 - i * 0.03})` }}
       >
-        <div className="skeleton mb-auto h-[55vh] w-full rounded-b-[24px]" />
+        <div
+          className="skeleton mb-auto h-[min(54dvh,480px)] w-full rounded-b-[24px]"
+        />
         <div className="px-5 pb-20">
           <div className="skeleton mb-3 h-4 w-24" />
           <div className="skeleton mb-2 h-8 w-full" />
@@ -224,9 +225,9 @@ export default function DealsPage() {
   return (
     <MobileAppFrame>
       <main className="page-enter relative flex min-h-[100dvh] flex-col overflow-hidden bg-[var(--is-bg)] text-[var(--is-text-1)]">
-        <header className="pointer-events-none absolute top-0 right-0 left-0 z-40 flex flex-col [padding-top:max(12px,env(safe-area-inset-top))]">
+        <header className="relative z-40 flex shrink-0 flex-col border-b-[0.5px] border-[var(--is-border-1)]/60 bg-[var(--is-bg)] [padding-top:max(12px,env(safe-area-inset-top))]">
           {showDemoBanner && (
-            <div className="pointer-events-auto mb-1 w-full px-4 py-2 text-center">
+            <div className="mb-1 w-full px-4 py-2 text-center">
               <Link
                 href="/onboard"
                 className="inline-block rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-3 py-2 text-[12px] font-medium text-[var(--is-text-1)]"
@@ -238,22 +239,22 @@ export default function DealsPage() {
           <div className="flex w-full items-center justify-between px-5 py-2">
             <Link
               href="/search"
-              className="pointer-events-auto flex min-h-[44px] items-center text-[13px] font-medium text-[var(--is-blue)]"
+              className="flex min-h-[44px] items-center text-[13px] font-medium text-[var(--is-blue)]"
             >
               ‹ Search
             </Link>
-            <span className="pointer-events-none text-center text-[15px] font-semibold tracking-[-0.01em] text-[var(--is-text-1)]">
+            <span className="text-center text-[15px] font-semibold tracking-[-0.01em] text-[var(--is-text-1)]">
               Deals
             </span>
             <Link
               href="/orders"
-              className="pointer-events-auto flex min-h-[44px] items-center text-[13px] font-medium text-[var(--is-blue)]"
+              className="flex min-h-[44px] items-center text-[13px] font-medium text-[var(--is-blue)]"
             >
               Orders
             </Link>
           </div>
           {pointsBalance > 0 ? (
-            <label className="pointer-events-auto mx-5 mt-1 mb-2 flex cursor-pointer items-center gap-3 rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-3 py-2.5">
+            <label className="mx-5 mt-1 mb-2 flex cursor-pointer items-center gap-3 rounded-[12px] border-[0.5px] border-[var(--is-border-1)] bg-[var(--is-surface)] px-3 py-2.5">
               <input
                 type="checkbox"
                 className="size-4 accent-[var(--is-purple)]"
@@ -269,7 +270,7 @@ export default function DealsPage() {
         </header>
 
         {loading && (
-          <div className="relative flex-1">
+          <div className="relative min-h-0 flex-1">
             <DealSkeleton i={0} />
             <DealSkeleton i={1} />
             <DealSkeleton i={2} />
@@ -277,7 +278,7 @@ export default function DealsPage() {
         )}
 
         {!loading && sortedDeals.length === 0 && (
-          <div className="relative flex flex-1 flex-col items-center justify-center px-6 py-24 text-center">
+          <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center px-6 py-24 text-center">
             <DataCard className="max-w-sm">
               <p className="text-[11px] font-semibold tracking-[0.08em] text-[var(--is-text-4)] uppercase">
                 All caught up
@@ -302,11 +303,11 @@ export default function DealsPage() {
         )}
 
         {!loading && sortedDeals.length > 0 && (
-          <div className="relative h-[100dvh] flex-1">
+          <div className="relative min-h-0 flex-1">
             {sharedMapOpen && stackMapVendors.length > 0 && topDeal ? (
               <div
                 key="deals-stack-map-host"
-                className="absolute top-0 right-0 left-0 z-10 h-[min(48vh,420px)] overflow-hidden rounded-b-[24px] bg-[var(--is-card)] [&_.leaflet-container]:!bg-[var(--is-card)]"
+                className="pointer-events-auto absolute top-0 right-0 left-0 z-[15] h-[min(54dvh,480px)] touch-auto overflow-hidden rounded-b-[24px] bg-[var(--is-card)] [&_.leaflet-container]:!bg-[var(--is-card)]"
               >
                 <DealsStackMap
                   userLocation={location}
@@ -333,9 +334,6 @@ export default function DealsPage() {
                 onSwipeNext={onSwipeNext}
               />
             ))}
-            <p className="pointer-events-none absolute right-0 bottom-8 left-0 z-40 text-center text-[11px] text-[var(--is-text-4)] [padding-bottom:env(safe-area-inset-bottom)]">
-              Swipe details left (next) or right (save) — map stays put
-            </p>
           </div>
         )}
       </main>

@@ -154,6 +154,8 @@ function DealTileInner({
   const passthroughSharedMap = Boolean(
     sharedMapLayerActive && showLiveMap,
   );
+  /** Below the top card, any opaque hero (pin, initials) sits above the shared map — use a spacer so the map shows through. */
+  const transparentStackHeroForMap = Boolean(sharedMapLayerActive && !isTop && !deal.mediaUrl);
 
   const releaseStartDetailDrag = useCallback(
     (nativeDown: globalThis.PointerEvent) => {
@@ -218,9 +220,104 @@ function DealTileInner({
     [isTop, teardownDetailsWindowListeners],
   );
 
+  const detailsPanel = (
+    <div
+      className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-5 pt-5"
+      style={{
+        paddingBottom: "calc(80px + env(safe-area-inset-bottom))",
+        WebkitOverflowScrolling: "touch",
+      }}
+      onPointerDown={onDetailsPointerDown}
+    >
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <StatusPill kind="flash">Flash</StatusPill>
+        <span className="text-[13px] font-[family-name:var(--is-mono)] text-[var(--is-red)] [font-variant-numeric:tabular-nums]">
+          {rem} left
+        </span>
+      </div>
+
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <h2 className="max-w-[70%] text-[24px] font-bold leading-[1.15] tracking-[-0.03em] text-[var(--is-text-1)]">
+          {deal.itemName}
+        </h2>
+        <span className="text-[28px] font-bold tracking-[-0.03em] text-[var(--is-text-1)] [font-variant-numeric:tabular-nums]">
+          ${price}
+        </span>
+      </div>
+
+      <p className="text-[15px] tracking-[-0.01em] text-[var(--is-text-2)]">
+        {deal.vendorName ?? "Vendor"}
+        {deal.pickupArea ? (
+          <>
+            {" · "}
+            <span className="font-medium text-[var(--is-text-1)]">{deal.pickupArea}</span>
+          </>
+        ) : null}
+      </p>
+      <p className="mt-1 text-[13px] text-[var(--is-text-3)]">
+        <span className="[font-variant-numeric:tabular-nums]">{walkM < 1000 ? `${walkM}m` : `${(walkM / 1000).toFixed(1)}km`}</span>{" "}
+        away
+        {mapsUrl ? (
+          <>
+            {" · "}
+            <a
+              href={mapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-[var(--is-blue)] underline decoration-[var(--is-blue)] underline-offset-2"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Directions
+            </a>
+          </>
+        ) : null}
+      </p>
+
+      <div className="mt-3">
+        <PillButton
+          variant="danger"
+          className="mt-3"
+          type="button"
+          onClick={() => {
+            vibrate(20);
+            onReserve(deal);
+          }}
+        >
+          Reserve now — ${price}
+        </PillButton>
+      </div>
+    </div>
+  );
+
+  if (passthroughSharedMap) {
+    return (
+      <motion.div
+        className="pointer-events-auto absolute inset-x-0 bottom-0 top-[min(54dvh,480px)] flex min-h-0 flex-col overflow-hidden rounded-t-[20px] bg-[var(--is-bg)] shadow-[0_-4px_24px_rgba(0,0,0,0.08)]"
+        style={{
+          zIndex: z,
+          scale,
+          opacity: stackIndex > 2 ? 0 : 1,
+          x: isTop ? x : 0,
+          rotate: isTop ? rot : 0,
+        }}
+        drag={isTop ? "x" : false}
+        dragControls={dragControls}
+        dragListener={false}
+        dragConstraints={{ left: -220, right: 220 }}
+        dragElastic={0.12}
+        onDragEnd={onDragEnd}
+        transition={{ type: "tween", duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
+      >
+        {detailsPanel}
+      </motion.div>
+    );
+  }
+
   return (
     <div
-      className="absolute inset-0 flex min-h-0 flex-col overflow-hidden"
+      className={`absolute inset-0 flex min-h-0 flex-col overflow-hidden ${
+        sharedMapLayerActive && !isTop ? "pointer-events-none" : ""
+      }`}
       style={{
         zIndex: z,
         scale,
@@ -228,10 +325,10 @@ function DealTileInner({
       }}
     >
       <div
-        className={`relative h-[min(48vh,420px)] shrink-0 overflow-hidden rounded-b-[24px] ${
-          passthroughSharedMap ? "pointer-events-none bg-transparent" : "bg-[var(--is-surface)]"
+        className={`relative h-[min(54dvh,480px)] shrink-0 overflow-hidden rounded-b-[24px] ${
+          transparentStackHeroForMap ? "pointer-events-none bg-transparent" : "bg-[var(--is-surface)]"
         }`}
-        onClick={passthroughSharedMap ? undefined : handleTapMedia}
+        onClick={transparentStackHeroForMap ? undefined : handleTapMedia}
       >
         {deal.mediaUrl ? (
           deal.mediaUrl.match(/\.(mp4|webm|mov)$/i) ? (
@@ -253,28 +350,23 @@ function DealTileInner({
             />
           )
         ) : showLiveMap ? (
-          passthroughSharedMap ? (
+          <div
+            className="relative size-full [&_.leaflet-container]:!bg-[var(--is-card)]"
+            style={{ pointerEvents: isTop ? "auto" : "none" }}
+          >
+            <OsmMapView
+              userLocation={userLocation}
+              vendors={mapVendors}
+              highlightedVendorId={deal.dealId}
+              className="size-full !min-h-0 rounded-none border-0"
+            />
             <div
               className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[var(--is-surface)]/90 to-transparent"
               aria-hidden
             />
-          ) : (
-            <div
-              className="relative size-full [&_.leaflet-container]:!bg-[var(--is-card)]"
-              style={{ pointerEvents: isTop ? "auto" : "none" }}
-            >
-              <OsmMapView
-                userLocation={userLocation}
-                vendors={mapVendors}
-                highlightedVendorId={deal.dealId}
-                className="size-full !min-h-0 rounded-none border-0"
-              />
-              <div
-                className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[var(--is-surface)]/90 to-transparent"
-                aria-hidden
-              />
-            </div>
-          )
+          </div>
+        ) : transparentStackHeroForMap ? (
+          <div className="pointer-events-none size-full bg-transparent" aria-hidden />
         ) : mapVendors.length > 0 && !isTop ? (
           <div
             className="flex size-full flex-col items-center justify-center gap-1 bg-[var(--is-card)] text-[var(--is-text-3)]"
@@ -303,7 +395,7 @@ function DealTileInner({
       </div>
 
       <motion.div
-        className="relative flex min-h-0 flex-1 touch-pan-y flex-col overflow-hidden bg-[var(--is-bg)]"
+        className="pointer-events-auto relative flex min-h-0 flex-1 touch-pan-y flex-col overflow-hidden bg-[var(--is-bg)]"
         style={{
           x: isTop ? x : 0,
           rotate: isTop ? rot : 0,
@@ -316,72 +408,7 @@ function DealTileInner({
         onDragEnd={onDragEnd}
         transition={{ type: "tween", duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
       >
-        <div
-          className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-5 pt-5"
-          style={{
-            paddingBottom: "calc(80px + env(safe-area-inset-bottom))",
-            WebkitOverflowScrolling: "touch",
-          }}
-          onPointerDown={onDetailsPointerDown}
-        >
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <StatusPill kind="flash">Flash</StatusPill>
-            <span className="text-[13px] font-[family-name:var(--is-mono)] text-[var(--is-red)] [font-variant-numeric:tabular-nums]">
-              {rem} left
-            </span>
-          </div>
-
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <h2 className="max-w-[70%] text-[24px] font-bold leading-[1.15] tracking-[-0.03em] text-[var(--is-text-1)]">
-              {deal.itemName}
-            </h2>
-            <span className="text-[28px] font-bold tracking-[-0.03em] text-[var(--is-text-1)] [font-variant-numeric:tabular-nums]">
-              ${price}
-            </span>
-          </div>
-
-          <p className="text-[15px] tracking-[-0.01em] text-[var(--is-text-2)]">
-            {deal.vendorName ?? "Vendor"}
-            {deal.pickupArea ? (
-              <>
-                {" · "}
-                <span className="font-medium text-[var(--is-text-1)]">{deal.pickupArea}</span>
-              </>
-            ) : null}
-          </p>
-          <p className="mt-1 text-[13px] text-[var(--is-text-3)]">
-            <span className="[font-variant-numeric:tabular-nums]">{walkM < 1000 ? `${walkM}m` : `${(walkM / 1000).toFixed(1)}km`}</span>{" "}
-            away
-            {mapsUrl ? (
-              <>
-                {" · "}
-                <a
-                  href={mapsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-[var(--is-blue)] underline decoration-[var(--is-blue)] underline-offset-2"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  Directions
-                </a>
-              </>
-            ) : null}
-          </p>
-
-          <div className="mt-3">
-            <PillButton
-              variant="danger"
-              className="mt-3"
-              type="button"
-              onClick={() => {
-                vibrate(20);
-                onReserve(deal);
-              }}
-            >
-              Reserve now — ${price}
-            </PillButton>
-          </div>
-        </div>
+        {detailsPanel}
       </motion.div>
     </div>
   );
