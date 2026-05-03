@@ -59,26 +59,33 @@ async def auto_flash_engine():
 async def _auto_flash_engine_inner():
     db = SessionLocal()
     try:
-        slow_vendors = db.execute(
-            text("""
-                SELECT v.id, v.name, v.phone,
-                       ST_Y(v.location::geometry) as lat,
-                       ST_X(v.location::geometry) as lng
-                FROM vendors v
-                WHERE COALESCE(v.reliability_score, 100) >= 50
-                  AND (
-                    SELECT COUNT(*) FROM orders o
-                    WHERE o.vendor_id = v.id
-                      AND o.created_at > NOW() - INTERVAL '2 hours'
-                ) < 2
-                  AND (
-                    SELECT COUNT(*) FROM flash_deals fd
-                    WHERE fd.vendor_id = v.id
-                      AND fd.status IN ('active','scheduled')
-                  ) = 0
-                LIMIT 50
-            """)
-        ).fetchall()
+        try:
+            slow_vendors = db.execute(
+                text("""
+                    SELECT v.id, v.name, v.phone,
+                           ST_Y(v.location::geometry) as lat,
+                           ST_X(v.location::geometry) as lng,
+                           COALESCE(v.brain_urgency_threshold, 0.55) as brain_urgency_threshold,
+                           COALESCE(v.neighborhood, '') as neighborhood
+                    FROM vendors v
+                    WHERE COALESCE(v.reliability_score, 100) >= 50
+                      AND COALESCE(v.brain_enabled, false) = true
+                      AND COALESCE(v.status, '') = 'active'
+                      AND (
+                        SELECT COUNT(*) FROM orders o
+                        WHERE o.vendor_id = v.id
+                          AND o.created_at > NOW() - INTERVAL '2 hours'
+                    ) < 2
+                      AND (
+                        SELECT COUNT(*) FROM flash_deals fd
+                        WHERE fd.vendor_id = v.id
+                          AND fd.status IN ('active','scheduled')
+                      ) = 0
+                    LIMIT 50
+                """)
+            ).fetchall()
+        except Exception:
+            slow_vendors = []
     finally:
         db.close()
 
@@ -91,11 +98,25 @@ async def _create_auto_deal(vendor):
     import re
     from datetime import timedelta
 
+    from app.services.brain_service import compute_brain_deal_price, groq_brain_why_sentence
+    from app.services.vendor_telegram_fsm import record_brain_last_action
+
+    vid = vendor.id
     db = SessionLocal()
     try:
         menu = db.execute(
-            text("SELECT item_name, price FROM menus WHERE vendor_id = :vid AND is_available = true LIMIT 20"),
-            {"vid": vendor.id},
+            text(
+                "SELECT id, item_name, price, price_floor FROM menus "
+                "WHERE vendor_id = :vid AND is_available = true LIMIT 20"
+            ),
+            {"vid": vid},
+        ).fetchall()
+    except Exception:
+        menu = db.execute(
+            text(
+                "SELECT id, item_name, price FROM menus WHERE vendor_id = :vid AND is_available = true LIMIT 20"
+            ),
+            {"vid": vid},
         ).fetchall()
     finally:
         db.close()
@@ -117,7 +138,7 @@ async def _create_auto_deal(vendor):
                     "content": (
                         f'Vendor "{vendor.name}" sells: {menu_str}. '
                         "It's a slow period. Pick 1 item for a flash deal. "
-                        'Return ONLY JSON: {"item": "...", "discount_pct": 30, "quantity": 15, "reason": "..."}'
+                        'Return ONLY JSON: {"item": "...", "quantity": 15, "reason": "..."}'
                     ),
                 }
             ],
@@ -128,8 +149,8 @@ async def _create_auto_deal(vendor):
         raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`")
         suggestion = json.loads(raw)
     except Exception as e:
-        print(f"[AutoDeal] Groq error for {vendor.id}: {e}")
-        suggestion = {"item": menu[0].item_name, "discount_pct": 30, "quantity": 15}
+        print(f"[AutoDeal] Groq error for {vid}: {e}")
+        suggestion = {"item": menu[0].item_name, "quantity": 15, "reason": "slow afternoon"}
 
     now = datetime.now(timezone.utc)
     end_time = (now + timedelta(minutes=45)).isoformat()
@@ -137,43 +158,92 @@ async def _create_auto_deal(vendor):
     db2 = SessionLocal()
     try:
         price_row = db2.execute(
-            text("SELECT price FROM menus WHERE vendor_id = :vid AND item_name ILIKE :name LIMIT 1"),
-            {"vid": vendor.id, "name": f"%{suggestion['item']}%"},
+            text(
+                "SELECT price, price_floor, item_name FROM menus "
+                "WHERE vendor_id = :vid AND item_name ILIKE :name LIMIT 1"
+            ),
+            {"vid": vid, "name": f"%{suggestion['item']}%"},
         ).fetchone()
-        original_price = float(price_row.price) if price_row else None
     finally:
         db2.close()
 
-    deal_price = (
-        round(original_price * (1 - suggestion["discount_pct"] / 100), 2) if original_price else None
-    )
+    if not price_row:
+        m0 = menu[0]
+        original_price = float(m0.price) if getattr(m0, "price", None) else None
+        try:
+            pfm = m0.price_floor
+        except Exception:
+            pfm = None
+        price_floor = float(pfm) if pfm is not None else None
+        resolved_name = m0.item_name
+    else:
+        original_price = float(price_row.price) if price_row.price else None
+        try:
+            pfr = price_row.price_floor
+        except Exception:
+            pfr = None
+        price_floor = float(pfr) if pfr is not None else None
+        resolved_name = price_row.item_name
+
+    if not original_price or original_price <= 0:
+        return
+
+    urgency = float(getattr(vendor, "brain_urgency_threshold", None) or 0.55)
+    factors = {
+        "orders_last_2h_under_2": True,
+        "vendor_name": vendor.name,
+        "groq_note": suggestion.get("reason"),
+    }
+    why = groq_brain_why_sentence(factors)
+    deal_price = compute_brain_deal_price(float(original_price or 0), price_floor, urgency)
 
     from app.services.deal_service import DealService
 
+    n_hood = getattr(vendor, "neighborhood", "") or None
     result = DealService().create_flash_deal(
         {
-            "vendor_id": vendor.id,
-            "item_name": suggestion["item"],
+            "vendor_id": vid,
+            "item_name": resolved_name,
             "original_price": original_price,
             "deal_price": deal_price,
-            "discount_pct": suggestion["discount_pct"],
-            "quantity": suggestion.get("quantity", 15),
+            "discount_pct": None,
+            "quantity": int(suggestion.get("quantity") or 15),
             "end_time": end_time,
             "radius_miles": 10,
             "lat": float(vendor.lat or 0),
             "lng": float(vendor.lng or 0),
             "vendor_name": getattr(vendor, "name", "") or "",
+            "pickup_area": n_hood,
+            "deal_origin": "brain",
+            "brain_why": why,
+            "brain_urgency_factors": factors,
         }
     )
     deal_id = result.get("dealId") if isinstance(result, dict) else None
 
-    from app.services.notify_service import notify_service
-
-    disc = suggestion["discount_pct"]
-    msg = f"InfraStreet creo deal: {disc}% {suggestion['item']} x45min. Clientes notificados."
+    qty = int(suggestion.get("quantity") or 15)
+    fl = price_floor
+    fls = f"${fl:g}" if fl is not None else "n/a"
+    msg = (
+        f"🧠 Brain fired a deal.\n\n"
+        f"{resolved_name} · ${deal_price:g} · {qty} available\n"
+        f"(Your floor: {fls})\n\n"
+        f"Why: {why}\n\n"
+        f"0 reservations so far."
+    )
     markup = None
     if deal_id:
-        markup = {"inline_keyboard": [[{"text": "Cancel", "callback_data": f"cancel_{deal_id}"}]]}
+        markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Keep it running", "callback_data": f"brain_ok_{deal_id}"},
+                    {"text": "⏹ Stop deal", "callback_data": f"cancel_{deal_id}"},
+                ]
+            ]
+        }
+    record_brain_last_action(vid, f"{resolved_name} flash · ${deal_price:g}")
+    from app.services.notify_service import notify_service
+
     await notify_service.send_message(vendor.phone, msg, "vendor", reply_markup=markup)
 
 

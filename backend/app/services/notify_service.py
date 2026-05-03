@@ -164,6 +164,84 @@ class NotifyService:
         print(f"[Notify] Sent {sent} notifications for deal {deal_id}")
         return {"sent": sent}
 
+    async def fan_out_new_vendor(
+        self,
+        vendor_id: str,
+        vendor_name: str,
+        lat: float,
+        lng: float,
+        neighborhood: str | None = None,
+    ):
+        """Ping opted-in nearby customers when a vendor finishes onboarding."""
+        if lat == 0 and lng == 0:
+            return {"sent": 0}
+        radius_meters = 10 * 1609.34
+        label = neighborhood or "nearby"
+        db = SessionLocal()
+        try:
+            customers = db.execute(
+                text(
+                    """
+                    SELECT c.id, c.phone, c.telegram_id, c.notification_channel,
+                           ROUND((ST_Distance(c.location::geography,
+                                  ST_MakePoint(:lng, :lat)::geography) / 1609.34)::numeric, 1) AS dist_miles
+                    FROM customers c
+                    WHERE c.notifications_enabled = true
+                      AND c.location IS NOT NULL
+                      AND ST_DWithin(c.location::geography,
+                                    ST_MakePoint(:lng, :lat)::geography,
+                                    :rm)
+                    ORDER BY dist_miles ASC
+                    LIMIT :cap
+                    """
+                ),
+                {"lat": lat, "lng": lng, "rm": radius_meters, "cap": 400},
+            ).fetchall()
+        finally:
+            db.close()
+
+        sent = 0
+        hook = f"{FRONTEND_URL}/deals"
+        msg = (
+            f"InfraStreet: {vendor_name} just joined in {label} — "
+            f"tap for today's stalls. {hook}"
+        )[:480]
+        for c in customers:
+            ch = (getattr(c, "notification_channel", None) or "sms").lower()
+            tg_id = getattr(c, "telegram_id", None)
+            if ch == "telegram" and tg_id:
+                r = await self._send_telegram_customer(int(tg_id), msg)
+                if not r.get("sent"):
+                    await self._send_twilio(c.phone, msg, TWILIO_CUSTOMER_SID)
+            elif ch == "both" and tg_id:
+                await self._send_telegram_customer(int(tg_id), msg)
+                await self._send_twilio(c.phone, msg, TWILIO_CUSTOMER_SID)
+            else:
+                await self._send_twilio(c.phone, msg, TWILIO_CUSTOMER_SID)
+            sent += 1
+            if sent % 30 == 0:
+                await asyncio.sleep(1.0)
+        print(f"[Notify] new vendor fan-out {vendor_id}: {sent} sends", flush=True)
+        return {"sent": sent}
+
+    async def notify_brain_deal_wrapup(
+        self,
+        vendor_phone: str,
+        item_name: str,
+        sold_units: int,
+        revenue: float,
+        units_saved: int,
+    ) -> None:
+        body = (
+            f"✅ Done.\n\n"
+            f"{item_name} deal closed.\n"
+            f"— Sold: {sold_units} units\n"
+            f"— Revenue: ${revenue:.2f}\n"
+            f"— Units saved from waste: {units_saved}\n\n"
+            f"Good service today."
+        )
+        await self.send_message(vendor_phone, body, "vendor")
+
     def notify_vendor_order(self, vendor_phone: str, message: str):
         print(f"[Vendor notify] {vendor_phone}: {message[:120]}")
         loop = asyncio.get_event_loop()

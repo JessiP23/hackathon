@@ -91,29 +91,50 @@ class DealService:
             start_dt = datetime.fromisoformat(str(start_time).replace("Z", "+00:00")) if start_time else datetime.now(timezone.utc)
             status = "active" if start_dt <= datetime.now(timezone.utc) else "scheduled"
 
+            pickup_area = data.get("pickup_area")
+            deal_origin = data.get("deal_origin") or "vendor"
+            brain_why = data.get("brain_why")
+            bf = data.get("brain_urgency_factors")
+            import json as _json
+
+            brain_json = _json.dumps(bf) if bf is not None else None
+
             result = db.execute(
                 text("""
                     INSERT INTO flash_deals (
                         id, vendor_id, item_name, original_price, deal_price,
                         discount_pct, remaining_quantity, total_quantity,
-                        start_at, end_at, status, radius_miles, media_url, location
+                        start_at, end_at, status, radius_miles, media_url, location,
+                        pickup_area, deal_origin, brain_why, brain_urgency_factors
                     ) VALUES (
                         'fd_' || substr(md5(random()::text), 1, 8),
                         :vendor_id, :item_name, :original_price, :deal_price,
                         :discount_pct, :quantity, :quantity,
                         :start_at, :end_at, :status, :radius_miles, :media_url,
-                        ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography
+                        ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                        :pickup_area, :deal_origin, :brain_why, CAST(:bf AS jsonb)
                     )
                     RETURNING id
                 """),
                 {
-                    "vendor_id": vendor_id, "item_name": item_name,
-                    "original_price": original_price, "deal_price": deal_price,
-                    "discount_pct": discount_pct, "quantity": quantity,
-                    "start_at": start_time, "end_at": end_time,
-                    "status": status, "radius_miles": radius_miles,
-                    "media_url": media_url, "lat": lat, "lng": lng,
-                }
+                    "vendor_id": vendor_id,
+                    "item_name": item_name,
+                    "original_price": original_price,
+                    "deal_price": deal_price,
+                    "discount_pct": discount_pct,
+                    "quantity": quantity,
+                    "start_at": start_time,
+                    "end_at": end_time,
+                    "status": status,
+                    "radius_miles": radius_miles,
+                    "media_url": media_url,
+                    "lat": lat,
+                    "lng": lng,
+                    "pickup_area": pickup_area,
+                    "deal_origin": deal_origin,
+                    "brain_why": brain_why,
+                    "bf": brain_json,
+                },
             )
             row = result.fetchone()
             if row is None:
@@ -234,20 +255,134 @@ class DealService:
 
     # ── Expire deals (called by scheduler) ────────────────────────────
     def expire_old_deals(self):
-        db = SessionLocal()
         try:
+            self._expire_old_deals_inner()
+        except Exception as e:
+            print(f"[DealService] expire_old_deals primary failed: {e}", flush=True)
+            db = SessionLocal()
+            try:
+                db.execute(
+                    text(
+                        "UPDATE flash_deals SET status = 'expired' WHERE status = 'active' AND end_at < NOW()"
+                    )
+                )
+                db.execute(
+                    text(
+                        "UPDATE flash_deals SET status = 'active' WHERE status = 'scheduled' AND start_at <= NOW()"
+                    )
+                )
+                db.execute(
+                    text(
+                        "UPDATE flash_deals SET status = 'sold_out' WHERE status = 'active' AND remaining_quantity = 0"
+                    )
+                )
+                db.commit()
+            finally:
+                db.close()
+
+    def _expire_old_deals_inner(self):
+        db = SessionLocal()
+        wrap_targets: list[dict] = []
+        try:
+            try:
+                closing = db.execute(
+                    text(
+                        """
+                        SELECT fd.id, fd.item_name, fd.total_quantity, fd.remaining_quantity,
+                               v.phone AS vendor_phone, fd.deal_origin
+                        FROM flash_deals fd
+                        JOIN vendors v ON v.id = fd.vendor_id
+                        WHERE fd.status = 'active'
+                          AND fd.vendor_end_notified_at IS NULL
+                          AND fd.deal_origin = 'brain'
+                          AND (fd.end_at < NOW() OR fd.remaining_quantity = 0)
+                        """
+                    )
+                ).fetchall()
+                for c in closing:
+                    oid = c.id
+                    rev_row = db.execute(
+                        text(
+                            """
+                            SELECT COALESCE(SUM(total), 0)
+                            FROM orders
+                            WHERE deal_id = :d AND status IN ('paid', 'fulfilled')
+                            """
+                        ),
+                        {"d": oid},
+                    ).fetchone()
+                    revenue = float(rev_row[0] or 0) if rev_row else 0.0
+                    sold = int(c.total_quantity or 0) - int(c.remaining_quantity or 0)
+                    wrap_targets.append(
+                        {
+                            "phone": c.vendor_phone,
+                            "item": c.item_name,
+                            "sold": max(0, sold),
+                            "revenue": revenue,
+                            "saved": max(0, sold),
+                            "deal_id": oid,
+                        }
+                    )
+            except Exception as e:
+                print(f"[DealService] brain wrapup scan: {e}", flush=True)
+
             db.execute(
-                text("UPDATE flash_deals SET status = 'expired' WHERE status = 'active' AND end_at < NOW()")
+                text("""
+                    UPDATE flash_deals
+                    SET status = 'expired',
+                        vendor_end_notified_at = COALESCE(vendor_end_notified_at, NOW())
+                    WHERE status = 'active' AND end_at < NOW()
+                """)
             )
             db.execute(
-                text("UPDATE flash_deals SET status = 'active' WHERE status = 'scheduled' AND start_at <= NOW()")
+                text("""
+                    UPDATE flash_deals SET status = 'active'
+                    WHERE status = 'scheduled' AND start_at <= NOW()
+                """)
             )
             db.execute(
-                text("UPDATE flash_deals SET status = 'sold_out' WHERE status = 'active' AND remaining_quantity = 0")
+                text("""
+                    UPDATE flash_deals
+                    SET status = 'sold_out',
+                        vendor_end_notified_at = COALESCE(vendor_end_notified_at, NOW())
+                    WHERE status = 'active' AND remaining_quantity = 0
+                """)
             )
+            for w in wrap_targets:
+                db.execute(
+                    text(
+                        "UPDATE flash_deals SET vendor_end_notified_at = NOW() WHERE id = :id"
+                    ),
+                    {"id": w["deal_id"]},
+                )
             db.commit()
         finally:
             db.close()
+
+        if wrap_targets:
+            async def _send_all():
+                from app.services.notify_service import notify_service
+
+                for w in wrap_targets:
+                    await notify_service.notify_brain_deal_wrapup(
+                        w["phone"],
+                        w["item"],
+                        w["sold"],
+                        w["revenue"],
+                        w["saved"],
+                    )
+
+            try:
+                asyncio.run(_send_all())
+            except RuntimeError:
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(_send_all())
+                    else:
+                        loop.run_until_complete(_send_all())
+                except Exception as e:
+                    print(f"[DealService] brain wrapup notify: {e}", flush=True)
 
     # ── Vendor stats ───────────────────────────────────────────────────
     def get_vendor_stats(self, vendor_id: str, days: int = 7) -> dict:

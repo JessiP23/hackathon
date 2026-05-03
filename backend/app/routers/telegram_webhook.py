@@ -7,6 +7,12 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.services.agent_service import agent_service
 from app.services import telegram_client
+from app.services import vendor_telegram_fsm
+from app.services.vendor_telegram_fsm import (
+    DEAL_CONFIRM,
+    ONBOARD_MENU_CONFIRM,
+    PRICE_FLOOR_CONFIRM,
+)
 
 router = APIRouter()
 
@@ -33,16 +39,31 @@ def _callback_chat_id(cq: dict) -> int | None:
 
 
 def _inline_for_step(step: str | None) -> dict | None:
-    if step == "awaiting_deal_confirm":
+    if step == DEAL_CONFIRM:
         return {
             "inline_keyboard": [
-                [{"text": "SI", "callback_data": "deal_yes"}, {"text": "NO", "callback_data": "deal_no"}],
+                [
+                    {"text": "YES", "callback_data": "deal_yes"},
+                    {"text": "NO", "callback_data": "deal_no"},
+                ],
             ]
         }
-    if step == "awaiting_menu_confirm":
+    if step == ONBOARD_MENU_CONFIRM:
         return {
             "inline_keyboard": [
-                [{"text": "SI", "callback_data": "menu_yes"}, {"text": "Editar", "callback_data": "menu_no"}],
+                [
+                    {"text": "YES", "callback_data": "menu_yes"},
+                    {"text": "NO", "callback_data": "menu_no"},
+                ],
+            ]
+        }
+    if step == PRICE_FLOOR_CONFIRM:
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "YES", "callback_data": "deal_yes"},
+                    {"text": "NO", "callback_data": "deal_no"},
+                ],
             ]
         }
     return None
@@ -67,6 +88,11 @@ async def telegram_webhook(request: Request):
             return {"ok": True}
 
         phone = _tg_phone(chat_id)
+
+        if data.startswith("brain_ok_"):
+            await telegram_client.answer_callback_query(cq_id, text="Got it.")
+            return {"ok": True}
+
         await telegram_client.answer_callback_query(cq_id)
 
         if data.startswith("cancel_"):
@@ -78,10 +104,10 @@ async def telegram_webhook(request: Request):
                 DealService().cancel_deal(deal_id, vendor["id"])
                 await telegram_client.send_message(
                     chat_id,
-                    "Listo. Deal cancelado; reembolsos en proceso si habia ordenes pagadas.",
+                    "Done — deal cancelled. Refunds are processing for any paid orders.",
                 )
             else:
-                await telegram_client.send_message(chat_id, "No encontramos tu tienda registrada.")
+                await telegram_client.send_message(chat_id, "We couldn't find your shop record.")
             return {"ok": True}
 
         if data == "deal_yes":
@@ -97,7 +123,7 @@ async def telegram_webhook(request: Request):
 
         try:
             reply = await agent_service.handle_vendor_message(phone, body)
-            markup = _inline_for_step((agent_service._get_state(phone) or {}).get("step"))
+            markup = _inline_for_step((vendor_telegram_fsm.get_state(phone) or {}).get("step"))
             sm = await telegram_client.send_message(chat_id, reply, reply_markup=markup)
             if not sm.get("ok"):
                 err = sm.get("description") or sm.get("text") or str(sm)
@@ -141,7 +167,7 @@ async def telegram_webhook(request: Request):
     image_bytes: bytes | None = None
     if msg.get("photo"):
         if agent_service._get_vendor_by_phone(phone):
-            await telegram_client.send_message(chat_id, "Leyendo tu menu... 📸")
+            await telegram_client.send_message(chat_id, "Reading your menu…")
         photos = msg["photo"]
         best = max(photos, key=lambda p: p.get("width", 0) * p.get("height", 0))
         fid = best.get("file_id")
@@ -159,6 +185,6 @@ async def telegram_webhook(request: Request):
         image_bytes=image_bytes,
         telegram_language_code=lang_hint,
     )
-    markup = _inline_for_step((agent_service._get_state(phone) or {}).get("step"))
+    markup = _inline_for_step((vendor_telegram_fsm.get_state(phone) or {}).get("step"))
     await telegram_client.send_message(chat_id, reply, reply_markup=markup)
     return {"ok": True}
