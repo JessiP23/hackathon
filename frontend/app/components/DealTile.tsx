@@ -172,8 +172,9 @@ function DealTileInner({
   }, [deal.dealId, deal.lat, deal.lng, deal.vendorName]);
 
   const showLiveMap = Boolean(!deal.mediaUrl && mapVendors.length > 0 && isTop);
+  /** Parent renders DealsStackMap behind the stack; top card must not paint an opaque hero or it hides the map. */
   const passthroughSharedMap = Boolean(
-    sharedMapLayerActive && showLiveMap,
+    sharedMapLayerActive && mapVendors.length > 0 && isTop,
   );
   /** Below the top card, any opaque hero (pin, initials) sits above the shared map — use a spacer so the map shows through. */
   const transparentStackHeroForMap = Boolean(sharedMapLayerActive && !isTop && !deal.mediaUrl);

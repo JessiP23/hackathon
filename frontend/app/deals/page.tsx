@@ -218,7 +218,7 @@ export default function DealsPage() {
 
   const topDeal = stackSlice[0];
   const sharedMapOpen = Boolean(
-    topDeal && !topDeal.mediaUrl && topDeal.lat != null && topDeal.lng != null,
+    topDeal && topDeal.lat != null && topDeal.lng != null,
   );
 
   const stackMapVendors: Vendor[] = useMemo(() => {

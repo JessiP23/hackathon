@@ -26,13 +26,19 @@ async def inapp_stream(phone: str = Query(..., min_length=5)):
         raise HTTPException(status_code=400, detail="invalid phone")
 
     url = os.getenv("REDIS_URL", "").strip()
+    if url and "://" not in url:
+        url = f"redis://{url}"
     ch = f"inapp:{norm}"
 
     async def event_gen():
         if not url:
             yield f"data: {json.dumps({'type': 'system', 'detail': 'redis_unset'})}\n\n"
             return
-        client = aioredis.from_url(url, decode_responses=True, socket_connect_timeout=3)
+        try:
+            client = aioredis.from_url(url, decode_responses=True, socket_connect_timeout=3)
+        except ValueError:
+            yield f"data: {json.dumps({'type': 'system', 'detail': 'redis_unset'})}\n\n"
+            return
         pubsub = client.pubsub()
         await pubsub.subscribe(ch)
         try:
