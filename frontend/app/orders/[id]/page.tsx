@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import QRCode from "qrcode";
-import { getOrder, getOrderReceipt } from "@/app/services/api";
+import { getOrder, getOrderReceipt, ackDealPaymentAuthorized } from "@/app/services/api";
 import { Order } from "@/app/shared/types";
 import { MobileAppFrame, MobileNav } from "@/app/components/MobileLayout";
 import {
@@ -58,6 +58,22 @@ export default function OrderDetailPage() {
       cancelled = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!order || order.status !== "pending_payment" || !order.stripePaymentIntent || !order.dealId) {
+      return;
+    }
+    let cancelled = false;
+    void ackDealPaymentAuthorized(order.orderId).then((r) => {
+      if (cancelled || !r.updated) return;
+      void getOrder(id).then((o) => {
+        if (!cancelled) setOrder(o);
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, order?.orderId, order?.status, order?.stripePaymentIntent, order?.dealId]);
 
   useEffect(() => {
     if (!order) return;

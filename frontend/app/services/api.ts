@@ -91,6 +91,53 @@ export async function getOrder(orderId: string): Promise<Order> {
   return res.data;
 }
 
+/** Resume Stripe Elements after refresh / direct link (uses PaymentIntent on the order). */
+export async function getOrderCheckoutSession(orderId: string): Promise<{
+  orderId: string;
+  clientSecret: string;
+  publishableKey: string;
+  trustLevel?: number;
+}> {
+  const res = await api.get(`/orders/${encodeURIComponent(orderId)}/checkout-session`);
+  return res.data;
+}
+
+/** Resume or create Stripe Hosted Checkout (vendor menu cart orders). */
+export async function getHostedCheckoutUrl(orderId: string): Promise<{ checkoutUrl: string; orderId?: string }> {
+  const res = await api.get(`/orders/${encodeURIComponent(orderId)}/hosted-checkout`);
+  return res.data;
+}
+
+/** Recover from missed Stripe webhooks after Hosted Checkout (local dev / connectivity). */
+export async function syncOrderStripeCheckout(orderId: string): Promise<{
+  ok?: boolean;
+  synced?: boolean;
+  status?: string;
+  error?: string;
+}> {
+  try {
+    const res = await api.post(`/orders/${encodeURIComponent(orderId)}/sync-stripe-checkout`);
+    return res.data;
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** Flash deal / Elements: after card is on file, sync DB + vendor Telegram if webhooks missed localhost. */
+export async function ackDealPaymentAuthorized(orderId: string): Promise<{
+  ok?: boolean;
+  updated?: boolean;
+  pi_status?: string;
+  error?: string;
+}> {
+  try {
+    const res = await api.post(`/orders/${encodeURIComponent(orderId)}/ack-payment-authorized`);
+    return res.data;
+  } catch {
+    return { ok: false };
+  }
+}
+
 export async function getOrderReceipt(orderId: string): Promise<{ receiptUrl: string | null }> {
   const res = await api.get(`/orders/${encodeURIComponent(orderId)}/receipt`);
   return res.data;

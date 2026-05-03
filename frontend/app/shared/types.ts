@@ -80,6 +80,8 @@ export interface Order {
   captureMethod?: string;
   trustLevel?: number;
   stripePaymentIntent?: string | null;
+  /** Stripe Hosted Checkout session id (menu orders). */
+  stripeCheckoutSessionId?: string | null;
   stripeCaptureMethod?: string | null;
   stripeCapturedAt?: string | null;
   customerNoShow?: boolean;

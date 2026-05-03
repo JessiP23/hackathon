@@ -2,12 +2,19 @@
 
 import { motion } from "framer-motion";
 import { useParams } from "next/navigation";
+import { useEffect } from "react";
 import { MobileAppFrame } from "@/app/components/MobileLayout";
 import { PillLink, StatusPill } from "@/app/components/Precision";
+import { syncOrderStripeCheckout } from "@/app/services/api";
 
 export default function OrderConfirmedPage() {
   const params = useParams();
   const id = params.id as string;
+
+  useEffect(() => {
+    if (!id) return;
+    void syncOrderStripeCheckout(id);
+  }, [id]);
 
   return (
     <MobileAppFrame>

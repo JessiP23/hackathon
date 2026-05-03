@@ -5,7 +5,12 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { loadStripe } from "@stripe/stripe-js";
 import type { StripeElementsOptions } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
-import { getOrder } from "@/app/services/api";
+import {
+  getOrder,
+  getOrderCheckoutSession,
+  getHostedCheckoutUrl,
+  ackDealPaymentAuthorized,
+} from "@/app/services/api";
 import type { Order } from "@/app/shared/types";
 import { MobileAppFrame, MobileNav } from "@/app/components/MobileLayout";
 import { DataCard, PillButton, DividerLine, stripeElementsAppearance } from "@/app/components/Precision";
@@ -29,6 +34,27 @@ function readPaySession(orderId: string | null): PaySession | null {
   return null;
 }
 
+function readHostedCheckout(orderId: string | null): { orderId: string; url: string } | null {
+  if (!orderId || typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem("infrastreet_checkout");
+    const p = raw ? (JSON.parse(raw) as { orderId?: string; url?: string }) : null;
+    if (p?.orderId === orderId && p.url) return { orderId, url: p.url };
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/** Query param may include pasted junk (e.g. another URL concatenated). */
+function parseOrderIdParam(raw: string | null): string | null {
+  if (!raw) return null;
+  const m = raw.match(/(o_[a-f0-9]{8})/i);
+  if (m) return m[1].toLowerCase();
+  const t = raw.trim();
+  return t.length ? t : null;
+}
+
 function PayForm({
   orderId,
   trustLevel,
@@ -36,7 +62,7 @@ function PayForm({
 }: {
   orderId: string;
   trustLevel: number;
-  onDone: () => void;
+  onDone: () => void | Promise<void>;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -61,7 +87,7 @@ function PayForm({
         setBusy(false);
         return;
       }
-      onDone();
+      await onDone();
     },
     [stripe, elements, orderId, onDone],
   );
@@ -126,14 +152,11 @@ function PayForm({
 function CheckoutInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const orderId = searchParams.get("orderId");
+  const orderId = parseOrderIdParam(searchParams.get("orderId"));
   const [order, setOrder] = useState<Order | null | undefined>(undefined);
   const [pay, setPay] = useState<PaySession | null | undefined>(undefined);
-
-  useEffect(() => {
-    const p = readPaySession(orderId);
-    setPay(p);
-  }, [orderId]);
+  const [hostedUrl, setHostedUrl] = useState<string | null | undefined>(undefined);
+  const [resumeError, setResumeError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!orderId) {
@@ -154,6 +177,106 @@ function CheckoutInner() {
     };
   }, [orderId]);
 
+  useEffect(() => {
+    if (!orderId || order === undefined || order === null) return;
+    if (order.status !== "pending_payment") {
+      router.replace(`/orders/${encodeURIComponent(orderId)}`);
+    }
+  }, [orderId, order, router]);
+
+  useEffect(() => {
+    if (!orderId || order === undefined || order === null) return;
+    if (order.status !== "pending_payment") return;
+
+    const isMenu = !order.dealId;
+
+    const fromPay = readPaySession(orderId);
+    if (fromPay) {
+      setPay(fromPay);
+      setHostedUrl(null);
+      setResumeError(null);
+      return;
+    }
+
+    if (order.stripePaymentIntent) {
+      setHostedUrl(null);
+      let cancelled = false;
+      setPay(undefined);
+      setResumeError(null);
+      void getOrderCheckoutSession(orderId)
+        .then((res) => {
+          if (cancelled) return;
+          const session: PaySession = {
+            orderId,
+            clientSecret: res.clientSecret,
+            publishableKey: res.publishableKey,
+            trustLevel: res.trustLevel ?? 0,
+          };
+          setPay(session);
+          try {
+            sessionStorage.setItem("infrastreet_pay", JSON.stringify(session));
+          } catch {
+            /* ignore */
+          }
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          setPay(null);
+          const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data
+            ?.detail;
+          setResumeError(typeof detail === "string" ? detail : "Could not restore payment.");
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (isMenu) {
+      setPay(null);
+      const fromHosted = readHostedCheckout(orderId);
+      if (fromHosted) {
+        setHostedUrl(fromHosted.url);
+        setResumeError(null);
+        return;
+      }
+      let cancelled = false;
+      setHostedUrl(undefined);
+      setResumeError(null);
+      void getHostedCheckoutUrl(orderId)
+        .then((res) => {
+          if (cancelled) return;
+          const url = res.checkoutUrl;
+          if (url) {
+            setHostedUrl(url);
+            try {
+              sessionStorage.setItem(
+                "infrastreet_checkout",
+                JSON.stringify({ orderId, url }),
+              );
+            } catch {
+              /* ignore */
+            }
+          } else {
+            setHostedUrl(null);
+          }
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          setHostedUrl(null);
+          const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data
+            ?.detail;
+          setResumeError(typeof detail === "string" ? detail : "Could not open Stripe Checkout.");
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setPay(null);
+    setHostedUrl(null);
+    setResumeError(null);
+  }, [orderId, order]);
+
   const stripePromise = useMemo(() => {
     if (!pay?.publishableKey) return null;
     return loadStripe(pay.publishableKey);
@@ -167,14 +290,30 @@ function CheckoutInner() {
     };
   }, [pay?.clientSecret]);
 
-  const onPaid = useCallback(() => {
+  const onPaid = useCallback(async () => {
+    if (orderId && order?.dealId) {
+      await ackDealPaymentAuthorized(orderId);
+    }
     router.push(`/orders/${encodeURIComponent(orderId!)}`);
-  }, [router, orderId]);
+  }, [router, orderId, order?.dealId]);
 
   const backHref =
     order && order.vendorId != null ? `/vendor/${order.vendorId}` : "/deals";
 
-  if (order === undefined || pay === undefined) {
+  const orderStillLoading = order === undefined;
+  const loadingElements =
+    order != null &&
+    order.status === "pending_payment" &&
+    Boolean(order.stripePaymentIntent) &&
+    pay === undefined;
+  const loadingHosted =
+    order != null &&
+    order.status === "pending_payment" &&
+    !order.stripePaymentIntent &&
+    !order.dealId &&
+    hostedUrl === undefined;
+
+  if (orderStillLoading || loadingElements || loadingHosted) {
     return (
       <>
         <MobileNav title="Checkout" backHref="/deals" />
@@ -198,6 +337,56 @@ function CheckoutInner() {
     );
   }
 
+  if (order.status !== "pending_payment") {
+    return (
+      <>
+        <MobileNav title="Checkout" backHref={backHref} />
+        <main className="page-enter px-5 py-10">
+          <DataCard>
+            <p className="text-[15px] text-[var(--is-text-2)]">Taking you to your order…</p>
+          </DataCard>
+        </main>
+      </>
+    );
+  }
+
+  if (hostedUrl) {
+    const isMenu = !order.dealId;
+    const total = order.total ?? 0;
+    return (
+      <>
+        <MobileNav title="Checkout" backHref={backHref} />
+        <main className="page-enter px-5 py-6">
+          <DataCard className="mb-6">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[17px] font-bold tracking-[-0.02em] text-[var(--is-text-1)]">
+                  {order.vendorName ?? "Vendor"}
+                </p>
+                <p className="mt-1 text-[12px] text-[var(--is-text-3)]">
+                  {isMenu ? "Menu order · Stripe Checkout" : "Stripe Checkout"}
+                </p>
+              </div>
+              <p className="text-[22px] font-bold tracking-[-0.03em] text-[var(--is-text-1)] [font-variant-numeric:tabular-nums]">
+                ${total.toFixed(2)}
+              </p>
+            </div>
+          </DataCard>
+          <DataCard>
+            <p className="mb-4 text-[14px] text-[var(--is-text-2)] leading-relaxed">
+              {
+                "Continue to Stripe's secure page to pay. When you're done, you'll land on your order confirmation."
+              }
+            </p>
+            <PillButton type="button" onClick={() => { window.location.href = hostedUrl; }}>
+              Continue to payment
+            </PillButton>
+          </DataCard>
+        </main>
+      </>
+    );
+  }
+
   if (!pay || !stripePromise || !elementsOptions) {
     return (
       <>
@@ -205,10 +394,15 @@ function CheckoutInner() {
         <main className="page-enter px-5 py-10">
           <DataCard>
             <p className="text-[15px] text-[var(--is-text-2)] mb-3">
-              Start checkout from a deal — payment session expired or missing.
+              {resumeError ??
+                (order.dealId && !order.stripePaymentIntent
+                  ? "This reservation has no active card session. Open the flash deal and reserve again."
+                  : !order.dealId
+                    ? "Could not open Stripe Checkout. Return to the vendor page and tap Pay again."
+                    : "Payment could not be loaded. Start again from the deal.")}
             </p>
-            <PillButton type="button" onClick={() => router.push("/deals")}>
-              Browse deals
+            <PillButton type="button" onClick={() => router.push(backHref)}>
+              {order.dealId ? "Browse deals" : "Back to vendor"}
             </PillButton>
           </DataCard>
         </main>
@@ -236,7 +430,9 @@ function CheckoutInner() {
               <p className="text-[17px] font-bold tracking-[-0.02em] text-[var(--is-text-1)]">
                 {order.vendorName ?? "Vendor"}
               </p>
-              <p className="mt-1 text-[12px] text-[var(--is-text-3)]">Flash deal · Stripe</p>
+              <p className="mt-1 text-[12px] text-[var(--is-text-3)]">
+                {order.dealId ? "Flash deal · Stripe" : "Menu order · Stripe"}
+              </p>
             </div>
             <p className="text-[22px] font-bold tracking-[-0.03em] text-[var(--is-text-1)] [font-variant-numeric:tabular-nums]">
               ${total.toFixed(2)}
